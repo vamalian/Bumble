@@ -138,16 +138,18 @@ fun PrivacyDashboardScreen(
             PermissionRowCard(
                 icon = Icons.Default.Mic,
                 title = "Microphone (RECORD_AUDIO)",
-                description = "Required for Gemini Live real-time audio and foreground 'Hey Bumble' wake word.",
+                description = "Required for voice input and foreground 'Hey Bumble' wake word.",
                 granted = micGranted,
                 actionLabel = if (micGranted) "App Settings" else "Grant Mic",
                 onAction = {
                     if (!micGranted) {
                         permLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     } else {
-                        context.startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
-                        )
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                            )
+                        }
                     }
                 }
             )
@@ -162,9 +164,11 @@ fun PrivacyDashboardScreen(
                     if (!camGranted) {
                         permLauncher.launch(Manifest.permission.CAMERA)
                     } else {
-                        context.startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
-                        )
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                            )
+                        }
                     }
                 }
             )
@@ -179,9 +183,11 @@ fun PrivacyDashboardScreen(
                     if (!notifGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
-                        context.startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
-                        )
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                            )
+                        }
                     }
                 }
             )
@@ -193,7 +199,9 @@ fun PrivacyDashboardScreen(
                 granted = notifListenerEnabled,
                 actionLabel = if (notifListenerEnabled) "Manage" else "Enable Access",
                 onAction = {
-                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    }
                 }
             )
 
@@ -204,9 +212,11 @@ fun PrivacyDashboardScreen(
                 granted = writeSettingsGranted,
                 actionLabel = if (writeSettingsGranted) "Manage" else "Grant",
                 onAction = {
-                    context.startActivity(
-                        Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}"))
-                    )
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}"))
+                        )
+                    }
                 }
             )
 

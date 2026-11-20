@@ -20,10 +20,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
@@ -53,10 +53,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.ai.CoreState
-import com.example.ai.LiveConnectionState
 import com.example.ai.WakeWordStatus
 import com.example.data.local.BumbleSettings
-import com.example.ui.LiveTranscriptEntry
+import com.example.ui.ChatEntry
 import com.example.ui.components.HolographicCore
 import com.example.ui.components.HudPanel
 import com.example.ui.components.HudTelemetryPill
@@ -73,17 +72,17 @@ import com.example.ui.theme.BumbleVoidBlack
 @Composable
 fun CoreDashboardScreen(
     coreState: CoreState,
-    connectionState: LiveConnectionState,
     wakeWordStatus: WakeWordStatus,
     statusBanner: String,
+    partialVoiceText: String,
     audioAmplitude: Float,
     settings: BumbleSettings,
     hasApiKey: Boolean,
     hasMicPermission: Boolean,
-    latestEntry: LiveTranscriptEntry?,
-    onRequestMicAndStartLive: () -> Unit,
+    latestEntry: ChatEntry?,
+    onTapCoreVoice: () -> Unit,
     onSendQuickCommand: (String) -> Unit,
-    onNavigateToLive: () -> Unit,
+    onNavigateToChat: () -> Unit,
     onNavigateToVision: () -> Unit,
     onNavigateToTools: () -> Unit,
     onNavigateToMemory: () -> Unit,
@@ -120,7 +119,7 @@ fun CoreDashboardScreen(
                         color = BumbleGoldBright
                     )
                     Text(
-                        text = "CORE // ${settings.voiceName.uppercase()} • ${settings.languageMode.substringBefore(" ")}",
+                        text = "${settings.geminiModel.uppercase()} • ${settings.languageMode.substringBefore(" ")}",
                         style = MaterialTheme.typography.labelSmall,
                         color = BumbleTextSecondary
                     )
@@ -141,15 +140,15 @@ fun CoreDashboardScreen(
                 }
             }
 
-            // Live Telemetry Status Row
+            // Telemetry Status Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val dotColor = when {
-                    coreState == CoreState.ERROR -> BumbleCrimson
-                    connectionState == LiveConnectionState.CONNECTED -> BumbleEmerald
+                val dotColor = when (coreState) {
+                    CoreState.ERROR -> BumbleCrimson
+                    CoreState.LISTENING, CoreState.SPEAKING -> BumbleEmerald
                     else -> BumbleGold
                 }
                 HudTelemetryPill(
@@ -170,23 +169,24 @@ fun CoreDashboardScreen(
                     audioAmplitude = audioAmplitude,
                     animationsEnabled = settings.animationsEnabled,
                     particleDensity = settings.particleDensity,
-                    onClick = {
-                        if (connectionState == LiveConnectionState.CONNECTED) {
-                            onNavigateToLive()
-                        } else {
-                            onRequestMicAndStartLive()
-                        }
-                    },
+                    onClick = onTapCoreVoice,
                     modifier = Modifier.size(280.dp)
                 )
             }
 
+            if (partialVoiceText.isNotBlank()) {
+                HudPanel(highlightBorder = true, modifier = Modifier.fillMaxWidth()) {
+                    Text("HEARING", style = MaterialTheme.typography.labelSmall, color = BumbleGold)
+                    Text(partialVoiceText, style = MaterialTheme.typography.bodyLarge, color = BumbleGoldBright)
+                }
+            }
+
             val wakeLabel = when (wakeWordStatus) {
                 WakeWordStatus.STANDBY_LISTENING -> "WAKE PHRASE ACTIVE (FOREGROUND): \"HEY BUMBLE\""
-                WakeWordStatus.TRIGGERED -> "WAKE PHRASE DETECTED — ENGAGING LIVE CORE"
-                WakeWordStatus.UNAVAILABLE -> "WAKE WORD UNAVAILABLE ON DEVICE — TAP CORE TO SPEAK"
+                WakeWordStatus.TRIGGERED -> "WAKE PHRASE DETECTED — LISTENING"
+                WakeWordStatus.UNAVAILABLE -> "TAP CORE TO SPEAK WITH GEMINI"
                 WakeWordStatus.SUSPENDED_BACKGROUND -> "WAKE LISTENER SUSPENDED"
-                WakeWordStatus.DISABLED -> if (!hasMicPermission) "GRANT MIC PERMISSION TO ENABLE VOICE & WAKE WORD" else "TAP CORE TO ACTIVATE GEMINI LIVE"
+                WakeWordStatus.DISABLED -> if (!hasMicPermission) "GRANT MIC PERMISSION TO ENABLE VOICE & WAKE WORD" else "TAP CORE TO SPEAK TO BUMBLE"
             }
             Text(
                 text = wakeLabel,
@@ -224,20 +224,24 @@ fun CoreDashboardScreen(
                 }
             }
 
-            // Primary Voice CTA
+            // Primary Voice & Vision Actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Button(
-                    onClick = onRequestMicAndStartLive,
+                    onClick = onTapCoreVoice,
                     colors = ButtonDefaults.buttonColors(containerColor = BumbleGold, contentColor = BumbleVoidBlack),
-                    modifier = Modifier.weight(1f).height(52.dp).testTag("start_live_button")
+                    modifier = Modifier.weight(1f).height(52.dp).testTag("talk_bumble_button")
                 ) {
                     Icon(Icons.Default.Mic, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        if (connectionState == LiveConnectionState.CONNECTED) "Open Live Console" else "Talk to Bumble"
+                        when (coreState) {
+                            CoreState.LISTENING -> "Stop Listening"
+                            CoreState.SPEAKING -> "Stop Speaking"
+                            else -> "Speak to Bumble"
+                        }
                     )
                 }
 
@@ -264,7 +268,7 @@ fun CoreDashboardScreen(
                         text = latestEntry.text,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 3
+                        maxLines = 4
                     )
                 }
             }
@@ -273,7 +277,7 @@ fun CoreDashboardScreen(
             OutlinedTextField(
                 value = quickInput,
                 onValueChange = { quickInput = it },
-                placeholder = { Text("Ask Bumble in English, Urdu, or Hindi...") },
+                placeholder = { Text("Ask Gemini in English, Urdu, or Hindi...") },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = BumbleGold,
@@ -318,9 +322,9 @@ fun CoreDashboardScreen(
                     leadingIconContentColor = BumbleGold
                 )
                 AssistChip(
-                    onClick = onNavigateToLive,
-                    label = { Text("Live Stream") },
-                    leadingIcon = { Icon(Icons.Default.GraphicEq, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    onClick = onNavigateToChat,
+                    label = { Text("Gemini Chat") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     colors = chipColors
                 )
                 AssistChip(

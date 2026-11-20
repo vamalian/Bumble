@@ -1,6 +1,6 @@
 {
   "name": "Bumble AI",
-  "description": "Futuristic JARVIS-style native Android AI assistant with a golden holographic core, powered by Google's Gemini Live API.",
+  "description": "Futuristic JARVIS-style native Android AI assistant with a golden holographic core, powered by Google's Gemini API.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

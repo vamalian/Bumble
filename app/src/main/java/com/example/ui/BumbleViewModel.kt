@@ -8,22 +8,21 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BumbleApp
+import com.example.ai.AssistantStatus
 import com.example.ai.ConnectionTestResult
 import com.example.ai.CoreState
-import com.example.ai.GeminiLiveClient
-import com.example.ai.GeminiLiveListener
-import com.example.ai.LiveConnectionState
+import com.example.ai.GeminiChatTurn
 import com.example.ai.WakeWordStatus
 import com.example.assistant.InstalledAppInfo
 import com.example.assistant.MathEvaluator
 import com.example.assistant.WeatherResult
 import com.example.assistant.WebSearchResult
+import com.example.data.local.BumbleSettings
 import com.example.data.local.ConversationMessageEntity
 import com.example.data.local.ConversationSessionEntity
 import com.example.data.local.MemoryEntity
 import com.example.data.local.NoteEntity
 import com.example.data.local.ReminderEntity
-import com.example.data.local.BumbleSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,11 +33,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.util.UUID
 
-data class LiveTranscriptEntry(
+data class ChatEntry(
     val id: String = UUID.randomUUID().toString(),
     val role: String, // "user", "assistant", "tool", "system"
     val text: String,
@@ -70,7 +67,7 @@ data class ToolsUiState(
     val actionFeedback: String? = null
 )
 
-class BumbleViewModel(application: Application) : AndroidViewModel(application), GeminiLiveListener {
+class BumbleViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as BumbleApp
     private val conversationDao = app.database.conversationDao()
@@ -79,13 +76,12 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
     private val reminderDao = app.database.reminderDao()
     private val secureKeyStore = app.secureKeyStore
     private val settingsDataStore = app.settingsDataStore
-    private val audioEngine = app.audioEngine
+    private val voiceInput = app.voiceInputManager
+    private val voiceOutput = app.voiceOutputManager
     private val wakeWordManager = app.wakeWordManager
     private val geminiRest = app.geminiRestClient
     private val actionExecutor = app.actionExecutor
     private val externalTools = app.externalTools
-
-    private val liveClient = GeminiLiveClient(this)
 
     val settings: StateFlow<BumbleSettings> = settingsDataStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, BumbleSettings())
@@ -103,24 +99,22 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val wakeWordStatus: StateFlow<WakeWordStatus> = wakeWordManager.status
+    val partialVoiceText: StateFlow<String> = voiceInput.partialText
 
-    private val _coreState = MutableStateFlow(CoreState.IDLE)
-    val coreState: StateFlow<CoreState> = _coreState.asStateFlow()
-
-    private val _connectionState = MutableStateFlow(LiveConnectionState.DISCONNECTED)
-    val connectionState: StateFlow<LiveConnectionState> = _connectionState.asStateFlow()
+    private val _assistantStatus = MutableStateFlow(AssistantStatus.READY)
+    val assistantStatus: StateFlow<AssistantStatus> = _assistantStatus.asStateFlow()
 
     private val _statusBanner = MutableStateFlow("Core Standby — Ready")
     val statusBanner: StateFlow<String> = _statusBanner.asStateFlow()
 
-    private val _liveTranscript = MutableStateFlow<List<LiveTranscriptEntry>>(emptyList())
-    val liveTranscript: StateFlow<List<LiveTranscriptEntry>> = _liveTranscript.asStateFlow()
-
-    private val _isMicPaused = MutableStateFlow(false)
-    val isMicPaused: StateFlow<Boolean> = _isMicPaused.asStateFlow()
+    private val _chatMessages = MutableStateFlow<List<ChatEntry>>(emptyList())
+    val chatMessages: StateFlow<List<ChatEntry>> = _chatMessages.asStateFlow()
 
     private val _isSpeakerMuted = MutableStateFlow(false)
     val isSpeakerMuted: StateFlow<Boolean> = _isSpeakerMuted.asStateFlow()
+
+    private val _isProcessing = MutableStateFlow(false)
+    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
     private val _hasApiKey = MutableStateFlow(secureKeyStore.hasApiKey())
     val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
@@ -146,14 +140,31 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
     private val _toolsState = MutableStateFlow(ToolsUiState())
     val toolsState: StateFlow<ToolsUiState> = _toolsState.asStateFlow()
 
+    private val _hasError = MutableStateFlow(false)
+
+    val coreState: StateFlow<CoreState> = combine(
+        voiceInput.isListening,
+        _isProcessing,
+        voiceOutput.isSpeaking,
+        _hasError
+    ) { listening, processing, speaking, error ->
+        when {
+            listening -> CoreState.LISTENING
+            processing -> CoreState.THINKING
+            speaking -> CoreState.SPEAKING
+            error -> CoreState.ERROR
+            else -> CoreState.IDLE
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CoreState.IDLE)
+
     val audioAmplitude: StateFlow<Float> = combine(
-        audioEngine.inputAmplitude,
-        audioEngine.outputAmplitude,
-        _coreState
+        voiceInput.rmsAmplitude,
+        voiceOutput.outputAmplitude,
+        coreState
     ) { inputAmp, outputAmp, state ->
         when (state) {
-            CoreState.SPEAKING -> maxOf(outputAmp, 0.22f)
-            CoreState.LISTENING -> maxOf(inputAmp, 0.10f)
+            CoreState.LISTENING -> maxOf(inputAmp, 0.14f)
+            CoreState.SPEAKING -> maxOf(outputAmp, 0.24f)
             CoreState.THINKING -> 0.45f
             else -> 0.05f
         }
@@ -161,12 +172,25 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
 
     private var activeSessionId: Long? = null
     private var isAppInForeground = false
-    private var speakingTimeoutJob: Job? = null
-    private var inputTranscriptBuffer = StringBuilder()
-    private var outputTranscriptBuffer = StringBuilder()
+    private var activeRequestJob: Job? = null
 
     init {
         refreshInstalledApps()
+        viewModelScope.launch {
+            voiceOutput.isSpeaking.collect { speaking ->
+                if (speaking) {
+                    _assistantStatus.value = AssistantStatus.SPEAKING
+                    _statusBanner.value = "Bumble Speaking..."
+                } else if (!_isProcessing.value && !voiceInput.isListening.value && !_hasError.value) {
+                    _assistantStatus.value = AssistantStatus.READY
+                    _statusBanner.value = "Core Standby — Ready"
+                    if (isAppInForeground) {
+                        delay(300L)
+                        evaluateWakeWordStandby()
+                    }
+                }
+            }
+        }
     }
 
     fun refreshInstalledApps() {
@@ -190,10 +214,11 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
     fun onAppBackgrounded() {
         isAppInForeground = false
         wakeWordManager.stopListening(backgrounded = true)
-        if (_connectionState.value != LiveConnectionState.DISCONNECTED) {
-            endLiveSession(dueToBackground = true)
-        } else {
-            audioEngine.stopAll()
+        voiceInput.stopListening()
+        voiceOutput.stop()
+        if (!_isProcessing.value) {
+            _assistantStatus.value = AssistantStatus.READY
+            _statusBanner.value = "Mic Stopped (App Left Foreground)"
         }
     }
 
@@ -201,13 +226,15 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
         val canListen = isAppInForeground &&
             settings.value.wakeWordEnabled &&
             hasMicPermission() &&
-            _connectionState.value == LiveConnectionState.DISCONNECTED
+            !voiceInput.isListening.value &&
+            !_isProcessing.value &&
+            !voiceOutput.isSpeaking.value
 
         if (canListen) {
             wakeWordManager.startForegroundListening {
                 viewModelScope.launch(Dispatchers.Main) {
-                    if (isAppInForeground && _connectionState.value == LiveConnectionState.DISCONNECTED) {
-                        startLiveSession()
+                    if (isAppInForeground && !voiceInput.isListening.value && !_isProcessing.value) {
+                        startVoiceCapture()
                     }
                 }
             }
@@ -216,328 +243,212 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
         }
     }
 
-    fun startLiveSession(initialPrompt: String? = null) {
-        val apiKey = secureKeyStore.getApiKey().orEmpty()
-        if (apiKey.isBlank()) {
-            _coreState.value = CoreState.ERROR
-            _connectionState.value = LiveConnectionState.ERROR
-            _statusBanner.value = "Gemini API Key Required — Open Settings"
-            appendTranscript("system", "No Gemini API key stored. Open Settings to enter and test your key.")
-            return
-        }
-
-        if (!hasMicPermission() && initialPrompt.isNullOrBlank()) {
-            _coreState.value = CoreState.ERROR
+    fun startVoiceCapture() {
+        if (!hasMicPermission()) {
+            _hasError.value = true
+            _assistantStatus.value = AssistantStatus.ERROR
             _statusBanner.value = "Microphone permission required for voice"
             return
         }
+        if (!secureKeyStore.hasApiKey()) {
+            _hasError.value = true
+            _assistantStatus.value = AssistantStatus.ERROR
+            _statusBanner.value = "Gemini API Key Required — Open Settings"
+            appendEntry("system", "No Gemini API key stored. Open Settings to enter and test your key.")
+            return
+        }
 
-        // Release WakeWord exclusive mic before opening AudioEngine
+        // Stop TTS and wake-word cleanly before opening voice SpeechRecognizer
+        voiceOutput.stop()
         wakeWordManager.stopListening(backgrounded = false)
+        _hasError.value = false
+        _assistantStatus.value = AssistantStatus.LISTENING
+        _statusBanner.value = "Listening — Speak Now"
 
-        viewModelScope.launch {
-            _isMicPaused.value = false
-            _isSpeakerMuted.value = false
-            _coreState.value = CoreState.THINKING
-            _statusBanner.value = "Establishing Gemini Live Link..."
-            inputTranscriptBuffer.clear()
-            outputTranscriptBuffer.clear()
-
-            val currentSettings = settings.value
-            if (currentSettings.saveConversationHistory && activeSessionId == null) {
-                activeSessionId = conversationDao.insertSession(
-                    ConversationSessionEntity(
-                        title = initialPrompt?.take(42)?.ifBlank { "Live Voice Session" } ?: "Live Voice Session",
-                        modelUsed = currentSettings.liveModel,
-                        languageMode = currentSettings.languageMode
-                    )
-                )
-            }
-
-            val approvedMemories = memoryDao.getApprovedMemories()
-            val memorySummary = approvedMemories.joinToString("\n") { "- [${it.category}] ${it.content}" }
-
-            liveClient.connect(apiKey, currentSettings, memorySummary)
-
-            if (!initialPrompt.isNullOrBlank()) {
-                delay(650)
-                sendLiveText(initialPrompt)
-            }
-        }
-    }
-
-    fun endLiveSession(dueToBackground: Boolean = false) {
-        speakingTimeoutJob?.cancel()
-        flushPendingTranscripts()
-        audioEngine.stopAll()
-        liveClient.disconnect()
-        _isMicPaused.value = false
-        _isSpeakerMuted.value = false
-        _connectionState.value = LiveConnectionState.DISCONNECTED
-        _coreState.value = CoreState.IDLE
-        _statusBanner.value = if (dueToBackground) {
-            "Mic & Audio Stopped (App Left Foreground)"
-        } else {
-            "Session Ended — Core Standby"
-        }
-        activeSessionId = null
-
-        if (!dueToBackground && isAppInForeground) {
-            viewModelScope.launch {
-                delay(500)
+        voiceInput.startListening(
+            languageMode = settings.value.languageMode,
+            onFinalResult = { spokenText ->
+                sendMessage(spokenText, isVoiceInput = true)
+            },
+            onError = { errMsg ->
+                _hasError.value = false
+                _assistantStatus.value = AssistantStatus.READY
+                _statusBanner.value = errMsg
                 evaluateWakeWordStandby()
             }
-        }
+        )
     }
 
-    fun toggleMicPause() {
-        val next = !_isMicPaused.value
-        _isMicPaused.value = next
-        audioEngine.setMicPaused(next)
-        _statusBanner.value = if (next) "Microphone Paused" else "Listening (Gemini Live)"
-        if (next && _coreState.value == CoreState.LISTENING) {
-            _coreState.value = CoreState.IDLE
-        } else if (!next && _connectionState.value == LiveConnectionState.CONNECTED) {
-            _coreState.value = CoreState.LISTENING
-        }
+    fun stopVoiceCapture() {
+        voiceInput.stopListening()
+        _assistantStatus.value = AssistantStatus.READY
+        _statusBanner.value = "Core Standby — Ready"
+        evaluateWakeWordStandby()
     }
 
     fun toggleSpeakerMute() {
         val next = !_isSpeakerMuted.value
         _isSpeakerMuted.value = next
-        audioEngine.setSpeakerMuted(next)
+        voiceOutput.setMuted(next)
     }
 
-    fun interruptBumble() {
-        audioEngine.interruptPlayback()
-        _coreState.value = if (_isMicPaused.value) CoreState.IDLE else CoreState.LISTENING
-        _statusBanner.value = "Interrupted — Listening"
+    fun stopSpeaking() {
+        voiceOutput.stop()
+        if (!_isProcessing.value && !voiceInput.isListening.value) {
+            _assistantStatus.value = AssistantStatus.READY
+            _statusBanner.value = "Speech Stopped — Ready"
+            evaluateWakeWordStandby()
+        }
     }
 
-    fun sendLiveText(text: String) {
+    fun startNewChat() {
+        activeRequestJob?.cancel()
+        voiceInput.stopListening()
+        voiceOutput.stop()
+        activeSessionId = null
+        _chatMessages.value = emptyList()
+        _hasError.value = false
+        _isProcessing.value = false
+        _assistantStatus.value = AssistantStatus.READY
+        _statusBanner.value = "New Session — Ready"
+        evaluateWakeWordStandby()
+    }
+
+    fun sendMessage(text: String, attachedBitmap: Bitmap? = null, isVoiceInput: Boolean = false) {
         val clean = text.trim()
-        if (clean.isEmpty()) return
-        if (_connectionState.value != LiveConnectionState.CONNECTED) {
-            startLiveSession(initialPrompt = clean)
+        if (clean.isEmpty() && attachedBitmap == null) return
+
+        val apiKey = secureKeyStore.getApiKey().orEmpty()
+        if (apiKey.isBlank()) {
+            _hasError.value = true
+            _assistantStatus.value = AssistantStatus.ERROR
+            _statusBanner.value = "Gemini API Key Required — Open Settings"
+            appendEntry("system", "No Gemini API key configured. Please enter your API key in Settings.")
             return
         }
-        audioEngine.interruptPlayback()
-        _coreState.value = CoreState.THINKING
-        _statusBanner.value = "Processing Command..."
-        appendTranscript("user", clean, persist = true)
-        liveClient.sendTextTurn(clean)
-    }
 
-    fun sendLiveImage(bitmap: Bitmap, caption: String = "Describe what you see in this frame.") {
-        if (_connectionState.value != LiveConnectionState.CONNECTED) {
-            _statusBanner.value = "Start a Live session first or analyze directly in Vision."
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            val baos = ByteArrayOutputStream()
-            val scaled = Bitmap.createScaledBitmap(bitmap, 640, (640f * bitmap.height / bitmap.width.coerceAtLeast(1)).toInt().coerceAtLeast(360), true)
-            scaled.compress(Bitmap.CompressFormat.JPEG, 78, baos)
-            liveClient.sendImageFrame(baos.toByteArray())
-            liveClient.sendTextTurn(caption)
-            appendTranscript("user", "[Vision Frame] $caption", persist = true)
-        }
-    }
+        wakeWordManager.stopListening(backgrounded = false)
+        voiceOutput.stop()
+        activeRequestJob?.cancel()
 
-    // --- GeminiLiveListener Callbacks ---
-
-    override fun onConnectionChanged(state: LiveConnectionState, message: String?) {
-        _connectionState.value = state
-        when (state) {
-            LiveConnectionState.CONNECTING -> {
-                _coreState.value = CoreState.THINKING
-                _statusBanner.value = "Connecting Gemini Live..."
-            }
-            LiveConnectionState.RECONNECTING -> {
-                _coreState.value = CoreState.THINKING
-                _statusBanner.value = message ?: "Reconnecting..."
-            }
-            LiveConnectionState.CONNECTED -> {
-                _statusBanner.value = "Gemini Live Active"
-            }
-            LiveConnectionState.DISCONNECTED -> {
-                if (_coreState.value != CoreState.ERROR) {
-                    _coreState.value = CoreState.IDLE
-                }
-            }
-            LiveConnectionState.ERROR -> {
-                _coreState.value = CoreState.ERROR
-                _statusBanner.value = message ?: "Connection Error"
-            }
-        }
-    }
-
-    override fun onSetupComplete() {
-        audioEngine.startPlayback()
-        if (hasMicPermission()) {
-            val started = audioEngine.startCapture { pcmChunk ->
-                liveClient.sendPcmAudio(pcmChunk)
-            }
-            if (started) {
-                _coreState.value = CoreState.LISTENING
-                _statusBanner.value = "Listening — Speak Naturally"
-            } else {
-                _coreState.value = CoreState.ERROR
-                _statusBanner.value = "Audio capture unavailable"
-            }
+        val displayUserText = if (attachedBitmap != null) {
+            if (clean.isNotBlank()) "[Attached Frame] $clean" else "[Attached Frame] Analyze this image."
         } else {
-            _coreState.value = CoreState.IDLE
-            _statusBanner.value = "Live Connected (Text Mode — Mic Permission Not Granted)"
+            clean
         }
-    }
+        val promptForModel = clean.ifBlank { "Describe and analyze this image." }
 
-    override fun onAudioOutput(pcm24kMono: ByteArray) {
-        _coreState.value = CoreState.SPEAKING
-        _statusBanner.value = "Bumble Speaking..."
-        audioEngine.writePlaybackPcm(pcm24kMono)
+        val historyBeforeTurn = _chatMessages.value
+            .filter { it.role == "user" || it.role == "assistant" }
+            .map { GeminiChatTurn(role = if (it.role == "user") "user" else "model", text = it.text) }
 
-        speakingTimeoutJob?.cancel()
-        speakingTimeoutJob = viewModelScope.launch {
-            delay(550)
-            audioEngine.resetOutputAmplitude()
-            if (_connectionState.value == LiveConnectionState.CONNECTED && !_isMicPaused.value) {
-                _coreState.value = CoreState.LISTENING
-                _statusBanner.value = "Listening — Interrupt Anytime"
+        appendEntry("user", displayUserText)
+
+        activeRequestJob = viewModelScope.launch {
+            _hasError.value = false
+            _isProcessing.value = true
+            _assistantStatus.value = AssistantStatus.PROCESSING
+            _statusBanner.value = "Gemini Thinking..."
+
+            try {
+                val currentSettings = settings.value
+                val sessionId = ensureSession(displayUserText, currentSettings)
+                persistMessage(sessionId, "user", displayUserText, isVoice = isVoiceInput, toolName = null)
+
+                val approvedMemories = memoryDao.getApprovedMemories()
+                val memorySummary = approvedMemories.joinToString("\n") { "- [${it.category}] ${it.content}" }
+
+                val result = geminiRest.sendAssistantTurn(
+                    apiKey = apiKey,
+                    settings = currentSettings,
+                    memoryContext = memorySummary,
+                    history = historyBeforeTurn,
+                    userText = promptForModel,
+                    attachedBitmap = attachedBitmap,
+                    onToolExecuted = { toolName, toolRes ->
+                        appendEntry("tool", toolRes.summary, toolName = toolName)
+                        persistMessage(sessionId, "tool", toolRes.summary, isVoice = false, toolName = toolName)
+                    },
+                    executeTool = { name, args ->
+                        actionExecutor.executeFunctionCall(name, args)
+                    },
+                    onPartialText = { _ -> }
+                )
+
+                _isProcessing.value = false
+                result.fold(
+                    onSuccess = { reply ->
+                        appendEntry("assistant", reply)
+                        persistMessage(sessionId, "assistant", reply, isVoice = currentSettings.autoSpeakReplies, toolName = null)
+                        if (currentSettings.autoSpeakReplies && !_isSpeakerMuted.value && isAppInForeground) {
+                            voiceOutput.speak(
+                                text = reply,
+                                voiceProfile = currentSettings.voiceProfile,
+                                languageMode = currentSettings.languageMode
+                            )
+                        } else {
+                            _assistantStatus.value = AssistantStatus.READY
+                            _statusBanner.value = "Core Standby — Ready"
+                            evaluateWakeWordStandby()
+                        }
+                    },
+                    onFailure = { e ->
+                        val errText = e.localizedMessage ?: "Gemini request failed."
+                        _hasError.value = true
+                        _assistantStatus.value = AssistantStatus.ERROR
+                        _statusBanner.value = errText
+                        appendEntry("system", "Error: $errText")
+                    }
+                )
+            } finally {
+                _isProcessing.value = false
             }
         }
     }
 
-    override fun onInterrupted() {
-        speakingTimeoutJob?.cancel()
-        audioEngine.interruptPlayback()
-        flushPendingTranscripts()
-        _coreState.value = if (_isMicPaused.value) CoreState.IDLE else CoreState.LISTENING
-        _statusBanner.value = "Interrupted — Listening"
+    private suspend fun ensureSession(firstTitle: String, currentSettings: BumbleSettings): Long? {
+        if (!currentSettings.saveConversationHistory) return null
+        val existing = activeSessionId
+        if (existing != null) return existing
+        val created = conversationDao.insertSession(
+            ConversationSessionEntity(
+                title = firstTitle.take(44).ifBlank { "Gemini Chat" },
+                modelUsed = currentSettings.geminiModel,
+                languageMode = currentSettings.languageMode
+            )
+        )
+        activeSessionId = created
+        return created
     }
 
-    override fun onTurnComplete() {
-        flushPendingTranscripts()
-        if (_connectionState.value == LiveConnectionState.CONNECTED && _coreState.value == CoreState.THINKING) {
-            _coreState.value = if (_isMicPaused.value) CoreState.IDLE else CoreState.LISTENING
-            _statusBanner.value = "Listening"
-        }
-    }
-
-    override fun onInputTranscript(text: String) {
-        inputTranscriptBuffer.append(text)
-        upsertStreamingTranscript("user", inputTranscriptBuffer.toString())
-    }
-
-    override fun onOutputTranscript(text: String) {
-        outputTranscriptBuffer.append(text)
-        upsertStreamingTranscript("assistant", outputTranscriptBuffer.toString())
-    }
-
-    override fun onModelTextFallback(text: String) {
-        outputTranscriptBuffer.append(text)
-        upsertStreamingTranscript("assistant", outputTranscriptBuffer.toString())
-    }
-
-    override fun onToolCall(id: String, name: String, args: JSONObject) {
-        _coreState.value = CoreState.THINKING
-        _statusBanner.value = "Executing: $name"
-        viewModelScope.launch {
-            val result = actionExecutor.executeFunctionCall(name, args)
-            appendTranscript("tool", result.summary, toolName = name, persist = true)
-            liveClient.sendToolResponse(id, name, result.payloadJson)
-        }
-    }
-
-    override fun onError(message: String) {
-        _coreState.value = CoreState.ERROR
-        _statusBanner.value = message
-        appendTranscript("system", "Error: $message")
-    }
-
-    private fun upsertStreamingTranscript(role: String, fullText: String) {
-        val current = _liveTranscript.value.toMutableList()
-        val last = current.lastOrNull()
-        if (last != null && last.role == role && last.id.startsWith("streaming_$role")) {
-            current[current.lastIndex] = last.copy(text = fullText)
-        } else {
-            current.add(LiveTranscriptEntry(id = "streaming_${role}_${System.nanoTime()}", role = role, text = fullText))
-        }
-        _liveTranscript.value = current
-    }
-
-    private fun flushPendingTranscripts() {
-        val userText = inputTranscriptBuffer.toString().trim()
-        val modelText = outputTranscriptBuffer.toString().trim()
-        inputTranscriptBuffer.clear()
-        outputTranscriptBuffer.clear()
-
-        // Finalize streaming IDs in memory
-        val updated = _liveTranscript.value.map {
-            if (it.id.startsWith("streaming_")) it.copy(id = UUID.randomUUID().toString()) else it
-        }
-        _liveTranscript.value = updated
-
-        val sessionId = activeSessionId ?: return
-        if (!settings.value.saveConversationHistory) return
-
-        viewModelScope.launch(Dispatchers.IO) {
-            if (userText.isNotBlank()) {
-                conversationDao.insertMessage(
-                    ConversationMessageEntity(
-                        sessionId = sessionId,
-                        role = "user",
-                        text = userText,
-                        isAudioTranscript = true
-                    )
-                )
-                conversationDao.updateSessionMeta(sessionId, userText.take(44), System.currentTimeMillis())
-            }
-            if (modelText.isNotBlank()) {
-                conversationDao.insertMessage(
-                    ConversationMessageEntity(
-                        sessionId = sessionId,
-                        role = "assistant",
-                        text = modelText,
-                        isAudioTranscript = true
-                    )
-                )
-                conversationDao.updateSessionMeta(
-                    sessionId,
-                    userText.ifBlank { modelText }.take(44),
-                    System.currentTimeMillis()
-                )
-            }
-        }
-    }
-
-    private fun appendTranscript(
+    private suspend fun persistMessage(
+        sessionId: Long?,
         role: String,
         text: String,
-        toolName: String? = null,
-        persist: Boolean = false
+        isVoice: Boolean,
+        toolName: String?
     ) {
-        _liveTranscript.value = _liveTranscript.value + LiveTranscriptEntry(
+        if (sessionId == null || !settings.value.saveConversationHistory) return
+        conversationDao.insertMessage(
+            ConversationMessageEntity(
+                sessionId = sessionId,
+                role = role,
+                text = text,
+                toolName = toolName,
+                isAudioTranscript = isVoice
+            )
+        )
+        if (role == "user") {
+            conversationDao.updateSessionMeta(sessionId, text.take(44), System.currentTimeMillis())
+        }
+    }
+
+    private fun appendEntry(role: String, text: String, toolName: String? = null) {
+        _chatMessages.value = _chatMessages.value + ChatEntry(
             role = role,
             text = text,
             toolName = toolName
         )
-        val sessionId = activeSessionId
-        if (persist && sessionId != null && settings.value.saveConversationHistory) {
-            viewModelScope.launch(Dispatchers.IO) {
-                conversationDao.insertMessage(
-                    ConversationMessageEntity(
-                        sessionId = sessionId,
-                        role = role,
-                        text = text,
-                        toolName = toolName
-                    )
-                )
-                conversationDao.updateSessionMeta(sessionId, text.take(44), System.currentTimeMillis())
-            }
-        }
-    }
-
-    fun clearLiveTranscript() {
-        _liveTranscript.value = emptyList()
     }
 
     // --- Settings & Secure API Key ---
@@ -550,8 +461,9 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
         if (!ok) {
             _statusBanner.value = "Failed to encrypt API key"
         } else if (_hasApiKey.value) {
+            _hasError.value = false
+            _assistantStatus.value = AssistantStatus.READY
             _statusBanner.value = "API key encrypted in Android Keystore"
-            if (_coreState.value == CoreState.ERROR) _coreState.value = CoreState.IDLE
         } else {
             _statusBanner.value = "API key cleared"
         }
@@ -568,7 +480,7 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
         val keyToTest = overrideKey?.takeIf { it.isNotBlank() } ?: secureKeyStore.getApiKey().orEmpty()
         viewModelScope.launch {
             _isTestingConnection.value = true
-            _connectionTestResult.value = geminiRest.testConnection(keyToTest)
+            _connectionTestResult.value = geminiRest.testConnection(keyToTest, settings.value.geminiModel)
             _isTestingConnection.value = false
         }
     }
@@ -599,7 +511,8 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
         viewModelScope.launch {
             conversationDao.deleteAllSessions()
             _selectedSessionMessages.value = emptyList()
-            _liveTranscript.value = emptyList()
+            _chatMessages.value = emptyList()
+            activeSessionId = null
         }
     }
 
@@ -811,8 +724,9 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
             memoryDao.deleteAllMemories()
             noteDao.deleteAllNotes()
             reminderDao.deleteAllReminders()
-            _liveTranscript.value = emptyList()
+            _chatMessages.value = emptyList()
             _selectedSessionMessages.value = emptyList()
+            activeSessionId = null
             _statusBanner.value = "All local conversations, memories, notes, and reminders cleared."
         }
     }
@@ -820,7 +734,7 @@ class BumbleViewModel(application: Application) : AndroidViewModel(application),
     override fun onCleared() {
         super.onCleared()
         wakeWordManager.stopListening(backgrounded = false)
-        audioEngine.stopAll()
-        liveClient.disconnect()
+        voiceInput.stopListening()
+        voiceOutput.shutdown()
     }
 }

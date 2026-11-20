@@ -14,9 +14,10 @@ import kotlinx.coroutines.flow.map
 private val Context.bumbleDataStore: DataStore<Preferences> by preferencesDataStore(name = "bumble_settings")
 
 data class BumbleSettings(
-    val liveModel: String = DEFAULT_LIVE_MODEL,
+    val geminiModel: String = DEFAULT_GEMINI_MODEL,
     val visionModel: String = DEFAULT_VISION_MODEL,
-    val voiceName: String = "Kore",
+    val voiceProfile: String = "JARVIS Crisp",
+    val autoSpeakReplies: Boolean = true,
     val languageMode: String = "Multilingual (EN / UR / HI)",
     val personality: String = "JARVIS Tactical",
     val customSystemPrompt: String = "",
@@ -28,13 +29,13 @@ data class BumbleSettings(
     val allowScreenCaptureTool: Boolean = false
 ) {
     companion object {
-        const val DEFAULT_LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+        const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
         const val DEFAULT_VISION_MODEL = "gemini-2.5-flash"
 
-        val LIVE_MODEL_OPTIONS = listOf(
-            "models/gemini-2.5-flash-native-audio-preview-12-2025",
-            "models/gemini-2.5-flash-native-audio-preview-09-2025",
-            "models/gemini-2.0-flash-live-001"
+        val GEMINI_MODEL_OPTIONS = listOf(
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro"
         )
 
         val VISION_MODEL_OPTIONS = listOf(
@@ -43,7 +44,13 @@ data class BumbleSettings(
             "gemini-2.5-flash-lite"
         )
 
-        val VOICE_OPTIONS = listOf("Kore", "Puck", "Charon", "Fenrir", "Aoede", "Zephyr")
+        val VOICE_PROFILES = listOf(
+            "JARVIS Crisp",
+            "Deep Tactical",
+            "Warm Balanced",
+            "Bright Fast",
+            "Calm Natural"
+        )
 
         val LANGUAGE_OPTIONS = listOf(
             "Multilingual (EN / UR / HI)",
@@ -59,15 +66,27 @@ data class BumbleSettings(
             "Multilingual Tutor",
             "Custom"
         )
+
+        fun sanitizeModelId(raw: String?): String {
+            val trimmed = raw?.trim().orEmpty()
+            if (trimmed.isBlank() ||
+                trimmed.contains("native-audio", ignoreCase = true) ||
+                trimmed.contains("-live-", ignoreCase = true)
+            ) {
+                return DEFAULT_GEMINI_MODEL
+            }
+            return trimmed.removePrefix("models/")
+        }
     }
 }
 
 class SettingsDataStore(private val context: Context) {
 
     private object Keys {
-        val LIVE_MODEL = stringPreferencesKey("live_model")
+        val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val VISION_MODEL = stringPreferencesKey("vision_model")
-        val VOICE_NAME = stringPreferencesKey("voice_name")
+        val VOICE_PROFILE = stringPreferencesKey("voice_profile")
+        val AUTO_SPEAK = booleanPreferencesKey("auto_speak_replies")
         val LANGUAGE_MODE = stringPreferencesKey("language_mode")
         val PERSONALITY = stringPreferencesKey("personality")
         val CUSTOM_PROMPT = stringPreferencesKey("custom_prompt")
@@ -81,9 +100,10 @@ class SettingsDataStore(private val context: Context) {
 
     val settingsFlow: Flow<BumbleSettings> = context.bumbleDataStore.data.map { prefs ->
         BumbleSettings(
-            liveModel = prefs[Keys.LIVE_MODEL] ?: BumbleSettings.DEFAULT_LIVE_MODEL,
-            visionModel = prefs[Keys.VISION_MODEL] ?: BumbleSettings.DEFAULT_VISION_MODEL,
-            voiceName = prefs[Keys.VOICE_NAME] ?: "Kore",
+            geminiModel = BumbleSettings.sanitizeModelId(prefs[Keys.GEMINI_MODEL]),
+            visionModel = BumbleSettings.sanitizeModelId(prefs[Keys.VISION_MODEL]),
+            voiceProfile = prefs[Keys.VOICE_PROFILE] ?: "JARVIS Crisp",
+            autoSpeakReplies = prefs[Keys.AUTO_SPEAK] ?: true,
             languageMode = prefs[Keys.LANGUAGE_MODE] ?: "Multilingual (EN / UR / HI)",
             personality = prefs[Keys.PERSONALITY] ?: "JARVIS Tactical",
             customSystemPrompt = prefs[Keys.CUSTOM_PROMPT] ?: "",
@@ -99,9 +119,10 @@ class SettingsDataStore(private val context: Context) {
     suspend fun updateSettings(transform: (BumbleSettings) -> BumbleSettings) {
         context.bumbleDataStore.edit { prefs ->
             val current = BumbleSettings(
-                liveModel = prefs[Keys.LIVE_MODEL] ?: BumbleSettings.DEFAULT_LIVE_MODEL,
-                visionModel = prefs[Keys.VISION_MODEL] ?: BumbleSettings.DEFAULT_VISION_MODEL,
-                voiceName = prefs[Keys.VOICE_NAME] ?: "Kore",
+                geminiModel = BumbleSettings.sanitizeModelId(prefs[Keys.GEMINI_MODEL]),
+                visionModel = BumbleSettings.sanitizeModelId(prefs[Keys.VISION_MODEL]),
+                voiceProfile = prefs[Keys.VOICE_PROFILE] ?: "JARVIS Crisp",
+                autoSpeakReplies = prefs[Keys.AUTO_SPEAK] ?: true,
                 languageMode = prefs[Keys.LANGUAGE_MODE] ?: "Multilingual (EN / UR / HI)",
                 personality = prefs[Keys.PERSONALITY] ?: "JARVIS Tactical",
                 customSystemPrompt = prefs[Keys.CUSTOM_PROMPT] ?: "",
@@ -113,9 +134,10 @@ class SettingsDataStore(private val context: Context) {
                 allowScreenCaptureTool = prefs[Keys.ALLOW_SCREEN_CAPTURE] ?: false
             )
             val updated = transform(current)
-            prefs[Keys.LIVE_MODEL] = updated.liveModel
-            prefs[Keys.VISION_MODEL] = updated.visionModel
-            prefs[Keys.VOICE_NAME] = updated.voiceName
+            prefs[Keys.GEMINI_MODEL] = BumbleSettings.sanitizeModelId(updated.geminiModel)
+            prefs[Keys.VISION_MODEL] = BumbleSettings.sanitizeModelId(updated.visionModel)
+            prefs[Keys.VOICE_PROFILE] = updated.voiceProfile
+            prefs[Keys.AUTO_SPEAK] = updated.autoSpeakReplies
             prefs[Keys.LANGUAGE_MODE] = updated.languageMode
             prefs[Keys.PERSONALITY] = updated.personality
             prefs[Keys.CUSTOM_PROMPT] = updated.customSystemPrompt

@@ -66,6 +66,13 @@ class AndroidActionExecutor(
 
     fun openApp(appQuery: String): ToolExecutionResult {
         val query = appQuery.trim().lowercase()
+        if (query.isBlank()) {
+            return ToolExecutionResult(
+                success = false,
+                summary = "Please specify an app name to open.",
+                payloadJson = JSONObject().put("ok", false).put("error", "Empty app query")
+            )
+        }
         val apps = listInstalledApps()
         val match = apps.firstOrNull { it.label.lowercase() == query || it.packageName.lowercase() == query }
             ?: apps.firstOrNull { it.label.lowercase().contains(query) || it.packageName.lowercase().contains(query) }
@@ -82,12 +89,20 @@ class AndroidActionExecutor(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return if (launchIntent != null) {
-            context.startActivity(launchIntent)
-            ToolExecutionResult(
-                success = true,
-                summary = "Opened ${match.label}.",
-                payloadJson = JSONObject().put("ok", true).put("app", match.label).put("package", match.packageName)
-            )
+            runCatching {
+                context.startActivity(launchIntent)
+                ToolExecutionResult(
+                    success = true,
+                    summary = "Opened ${match.label}.",
+                    payloadJson = JSONObject().put("ok", true).put("app", match.label).put("package", match.packageName)
+                )
+            }.getOrElse { e ->
+                ToolExecutionResult(
+                    success = false,
+                    summary = "Failed to open ${match.label}: ${e.localizedMessage}",
+                    payloadJson = JSONObject().put("ok", false).put("error", e.localizedMessage ?: "Launch error")
+                )
+            }
         } else {
             ToolExecutionResult(
                 success = false,
@@ -337,18 +352,21 @@ class AndroidActionExecutor(
     }
 
     fun scheduleReminderAlarm(reminderId: Long, title: String, triggerAtMillis: Long) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(context, ReminderReceiver::class.java).apply {
-            putExtra(ReminderReceiver.EXTRA_REMINDER_ID, reminderId)
-            putExtra(ReminderReceiver.EXTRA_REMINDER_TITLE, title)
+        runCatching {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val intent = Intent(context, ReminderReceiver::class.java).apply {
+                putExtra(ReminderReceiver.EXTRA_REMINDER_ID, reminderId)
+                putExtra(ReminderReceiver.EXTRA_REMINDER_TITLE, title)
+            }
+            val requestCode = (reminderId and 0x7FFFFFFFL).toInt()
+            val pending = PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pending)
         }
-        val pending = PendingIntent.getBroadcast(
-            context,
-            reminderId.toInt(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pending)
     }
 
     suspend fun saveSuggestedMemory(content: String, category: String = "Fact", autoApprove: Boolean = false): ToolExecutionResult {
@@ -516,57 +534,57 @@ class AndroidActionExecutor(
 
     companion object {
         /**
-         * Official Gemini Live API function declarations sent during WebSocket setup.
+         * Standard Gemini REST API function declarations sent with generateContent requests.
          */
         fun buildGeminiFunctionDeclarations(): JSONArray {
             return JSONArray().apply {
                 put(fn("open_app", "Open an installed Android application by name or package.",
-                    mapOf("app_name" to ("string" to "Human-readable name of the app to launch, e.g. Spotify, YouTube, Settings"))))
+                    mapOf("app_name" to ("STRING" to "Human-readable name of the app to launch, e.g. Spotify, YouTube, Settings"))))
                 put(fn("open_settings", "Open a specific Android system settings screen.",
-                    mapOf("setting" to ("string" to "Target setting: wifi, bluetooth, display, sound, location, battery, notification, or general"))))
+                    mapOf("setting" to ("STRING" to "Target setting: wifi, bluetooth, display, sound, location, battery, notification, or general"))))
                 put(fn("adjust_volume", "Adjust device audio volume for media, alarm, or ringtone.",
                     mapOf(
-                        "stream" to ("string" to "Audio stream: media, alarm, ring, notification"),
-                        "percent" to ("integer" to "Target volume percentage from 0 to 100 (optional)"),
-                        "direction" to ("string" to "up, down, or mute (optional)")
+                        "stream" to ("STRING" to "Audio stream: media, alarm, ring, notification"),
+                        "percent" to ("INTEGER" to "Target volume percentage from 0 to 100 (optional)"),
+                        "direction" to ("STRING" to "up, down, or mute (optional)")
                     )))
                 put(fn("adjust_brightness", "Adjust device screen brightness percentage if Write Settings permission is granted.",
-                    mapOf("percent" to ("integer" to "Brightness percentage from 5 to 100"))))
+                    mapOf("percent" to ("INTEGER" to "Brightness percentage from 5 to 100"))))
                 put(fn("launch_camera", "Launch the device camera app.", emptyMap()))
                 put(fn("set_alarm", "Set an alarm on the Android Clock app.",
                     mapOf(
-                        "hour" to ("integer" to "Hour in 24-hour format (0-23)"),
-                        "minute" to ("integer" to "Minute (0-59)"),
-                        "label" to ("string" to "Optional alarm label")
+                        "hour" to ("INTEGER" to "Hour in 24-hour format (0-23)"),
+                        "minute" to ("INTEGER" to "Minute (0-59)"),
+                        "label" to ("STRING" to "Optional alarm label")
                     )))
                 put(fn("set_timer", "Start a countdown timer on the Android Clock app.",
                     mapOf(
-                        "seconds" to ("integer" to "Timer duration in seconds"),
-                        "label" to ("string" to "Optional timer label")
+                        "seconds" to ("INTEGER" to "Timer duration in seconds"),
+                        "label" to ("STRING" to "Optional timer label")
                     )))
                 put(fn("create_note", "Save a new personal note in Bumble local storage.",
                     mapOf(
-                        "title" to ("string" to "Short title for the note"),
-                        "content" to ("string" to "Detailed note content")
+                        "title" to ("STRING" to "Short title for the note"),
+                        "content" to ("STRING" to "Detailed note content")
                     )))
                 put(fn("list_notes", "Retrieve saved personal notes.", emptyMap()))
                 put(fn("create_reminder", "Create a local reminder that notifies the user after a specified number of minutes.",
                     mapOf(
-                        "title" to ("string" to "Reminder title"),
-                        "minutes_from_now" to ("integer" to "Minutes from now to trigger")
+                        "title" to ("STRING" to "Reminder title"),
+                        "minutes_from_now" to ("INTEGER" to "Minutes from now to trigger")
                     )))
                 put(fn("save_memory", "Queue a personal fact or preference to the user's Personal Memory screen for explicit user approval.",
                     mapOf(
-                        "content" to ("string" to "Concise fact or preference to remember"),
-                        "category" to ("string" to "Preference, Fact, Routine, or Note")
+                        "content" to ("STRING" to "Concise fact or preference to remember"),
+                        "category" to ("STRING" to "Preference, Fact, Routine, or Note")
                     )))
                 put(fn("read_notifications", "Read recent Android notifications only if the user explicitly granted Notification Access.", emptyMap()))
                 put(fn("calculate", "Evaluate a mathematical expression accurately.",
-                    mapOf("expression" to ("string" to "Math expression e.g. (125 * 4.5) + sqrt(144)"))))
+                    mapOf("expression" to ("STRING" to "Math expression e.g. (125 * 4.5) + sqrt(144)"))))
                 put(fn("get_weather", "Fetch real-time weather conditions for a city.",
-                    mapOf("city" to ("string" to "City name, e.g. Karachi, Mumbai, London, New York"))))
+                    mapOf("city" to ("STRING" to "City name, e.g. Karachi, Mumbai, London, New York"))))
                 put(fn("web_search", "Search the web for factual summaries and quick answers.",
-                    mapOf("query" to ("string" to "Search query"))))
+                    mapOf("query" to ("STRING" to "Search query"))))
             }
         }
 

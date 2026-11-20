@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +64,10 @@ fun HistoryScreen(
     var activeSessionId by remember { mutableStateOf<Long?>(null) }
     val dateFmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
 
+    BackHandler(enabled = activeSessionId != null) {
+        activeSessionId = null
+    }
+
     val filtered = remember(sessions, searchQuery) {
         if (searchQuery.isBlank()) sessions
         else sessions.filter { it.title.contains(searchQuery, ignoreCase = true) }
@@ -124,7 +129,7 @@ fun HistoryScreen(
                         Icon(Icons.Default.History, contentDescription = null, tint = BumbleGold)
                         Text("No Saved Sessions", style = MaterialTheme.typography.titleMedium, color = BumbleGoldBright)
                         Text(
-                            "Your Gemini Live conversations appear here automatically when history saving is enabled in Settings.",
+                            "Your Gemini conversations appear here automatically when history saving is enabled in Settings.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = BumbleTextSecondary
                         )

@@ -38,9 +38,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ScreenshotMonitor
 import androidx.compose.material3.AlertDialog
@@ -88,10 +88,9 @@ import java.nio.ByteBuffer
 @Composable
 fun VisionScreen(
     visionState: VisionUiState,
-    isLiveConnected: Boolean,
     onImageReady: (Bitmap?, String) -> Unit,
     onAnalyze: (String) -> Unit,
-    onSendToLive: (Bitmap, String) -> Unit,
+    onSendToChat: (Bitmap, String) -> Unit,
     onVisionError: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -129,6 +128,8 @@ fun VisionScreen(
                 if (bmp != null) {
                     showCameraPreview = false
                     onImageReady(bmp, "Photo Picker Image")
+                } else {
+                    onVisionError("Selected image could not be decoded.")
                 }
             }.onFailure { e ->
                 onVisionError("Could not decode image: ${e.localizedMessage}")
@@ -185,7 +186,6 @@ fun VisionScreen(
         ) {
             Text("AI Camera & Screen Vision", style = MaterialTheme.typography.headlineMedium, color = BumbleGoldBright)
 
-            // Preview / Captured Frame Container
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = BumbleGraphite,
@@ -208,22 +208,33 @@ fun VisionScreen(
                                     val previewView = PreviewView(ctx)
                                     val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                                     cameraProviderFuture.addListener({
-                                        val provider = cameraProviderFuture.get()
-                                        val preview = Preview.Builder().build().also {
-                                            it.surfaceProvider = previewView.surfaceProvider
-                                        }
-                                        val capture = ImageCapture.Builder()
-                                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                                            .build()
-                                        imageCapture = capture
                                         runCatching {
+                                            val provider = cameraProviderFuture.get()
+                                            val selector = when {
+                                                provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
+                                                provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
+                                                else -> null
+                                            }
+                                            if (selector == null) {
+                                                onVisionError("No hardware camera available on this device.")
+                                                return@addListener
+                                            }
+                                            val preview = Preview.Builder().build().also {
+                                                it.surfaceProvider = previewView.surfaceProvider
+                                            }
+                                            val capture = ImageCapture.Builder()
+                                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                                .build()
+                                            imageCapture = capture
                                             provider.unbindAll()
                                             provider.bindToLifecycle(
                                                 lifecycleOwner,
-                                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                                selector,
                                                 preview,
                                                 capture
                                             )
+                                        }.onFailure { e ->
+                                            onVisionError("Camera unavailable: ${e.localizedMessage}")
                                         }
                                     }, ContextCompat.getMainExecutor(ctx))
                                     previewView
@@ -247,7 +258,6 @@ fun VisionScreen(
                 }
             }
 
-            // Capture / Source Controls
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -266,8 +276,12 @@ fun VisionScreen(
                                     override fun onCaptureSuccess(image: ImageProxy) {
                                         val bmp = imageProxyToBitmap(image)
                                         image.close()
-                                        showCameraPreview = false
-                                        onImageReady(bmp, "CameraX Frame")
+                                        if (bmp != null) {
+                                            showCameraPreview = false
+                                            onImageReady(bmp, "CameraX Frame")
+                                        } else {
+                                            onVisionError("Unable to decode captured camera frame.")
+                                        }
                                     }
 
                                     override fun onError(exception: ImageCaptureException) {
@@ -316,7 +330,6 @@ fun VisionScreen(
                 }
             }
 
-            // Question Prompt + Analyze
             OutlinedTextField(
                 value = promptInput,
                 onValueChange = { promptInput = it },
@@ -337,14 +350,14 @@ fun VisionScreen(
                     Text("Analyze with Gemini")
                 }
 
-                if (isLiveConnected && visionState.previewBitmap != null) {
+                if (visionState.previewBitmap != null) {
                     OutlinedButton(
-                        onClick = { onSendToLive(visionState.previewBitmap, promptInput) },
+                        onClick = { onSendToChat(visionState.previewBitmap, promptInput) },
                         border = BorderStroke(1.dp, BumbleGold)
                     ) {
-                        Icon(Icons.Default.GraphicEq, contentDescription = null, tint = BumbleGoldBright)
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = BumbleGoldBright)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Send to Live", color = BumbleGoldBright)
+                        Text("Ask in Chat", color = BumbleGoldBright)
                     }
                 }
             }
@@ -401,11 +414,11 @@ fun VisionScreen(
     }
 }
 
-private fun imageProxyToBitmap(proxy: ImageProxy): Bitmap {
+private fun imageProxyToBitmap(proxy: ImageProxy): Bitmap? {
     val buffer: ByteBuffer = proxy.planes[0].buffer
     val bytes = ByteArray(buffer.remaining())
     buffer.get(bytes)
-    val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
     val rotation = proxy.imageInfo.rotationDegrees
     return if (rotation != 0) {
         val matrix = Matrix().apply { postRotate(rotation.toFloat()) }

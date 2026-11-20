@@ -17,9 +17,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Psychology
@@ -53,12 +53,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.ai.LiveConnectionState
+import com.example.ai.CoreState
 import com.example.ui.BumbleViewModel
 import com.example.ui.components.HudBackdrop
+import com.example.ui.screens.AssistantChatScreen
 import com.example.ui.screens.CoreDashboardScreen
 import com.example.ui.screens.HistoryScreen
-import com.example.ui.screens.LiveConversationScreen
 import com.example.ui.screens.MemoryScreen
 import com.example.ui.screens.PrivacyDashboardScreen
 import com.example.ui.screens.SettingsScreen
@@ -73,7 +73,7 @@ import com.example.ui.theme.BumbleVoidBlack
 
 object BumbleRoutes {
     const val CORE_DASHBOARD = "core_dashboard"
-    const val LIVE_CONVERSATION = "live_conversation"
+    const val ASSISTANT_CHAT = "assistant_chat"
     const val VISION = "vision"
     const val TOOLS = "tools_dashboard"
     const val MEMORY = "memory"
@@ -117,13 +117,13 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
     val app = context.applicationContext as BumbleApp
 
     val coreState by viewModel.coreState.collectAsStateWithLifecycle()
-    val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val wakeWordStatus by viewModel.wakeWordStatus.collectAsStateWithLifecycle()
     val statusBanner by viewModel.statusBanner.collectAsStateWithLifecycle()
+    val partialVoiceText by viewModel.partialVoiceText.collectAsStateWithLifecycle()
     val audioAmplitude by viewModel.audioAmplitude.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val transcript by viewModel.liveTranscript.collectAsStateWithLifecycle()
-    val isMicPaused by viewModel.isMicPaused.collectAsStateWithLifecycle()
+    val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
+    val isProcessing by viewModel.isProcessing.collectAsStateWithLifecycle()
     val isSpeakerMuted by viewModel.isSpeakerMuted.collectAsStateWithLifecycle()
     val hasApiKey by viewModel.hasApiKey.collectAsStateWithLifecycle()
     val maskedApiKey by viewModel.maskedApiKey.collectAsStateWithLifecycle()
@@ -155,38 +155,35 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
     ) { granted ->
         viewModel.evaluateWakeWordStandby()
         if (granted) {
-            viewModel.startLiveSession()
-            navController.navigate(BumbleRoutes.LIVE_CONVERSATION) {
-                launchSingleTop = true
-            }
+            viewModel.startVoiceCapture()
         } else {
-            viewModel.startLiveSession(initialPrompt = "Hello Bumble, microphone permission was declined so I am using text mode.")
-            navController.navigate(BumbleRoutes.LIVE_CONVERSATION) {
+            navController.navigate(BumbleRoutes.ASSISTANT_CHAT) {
                 launchSingleTop = true
             }
         }
     }
 
-    val requestMicAndStartLive: () -> Unit = {
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            if (connectionState != LiveConnectionState.CONNECTED) {
-                viewModel.startLiveSession()
+    val onTapVoiceAction: () -> Unit = {
+        when (coreState) {
+            CoreState.LISTENING -> viewModel.stopVoiceCapture()
+            CoreState.SPEAKING -> viewModel.stopSpeaking()
+            else -> {
+                val granted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (granted) {
+                    viewModel.startVoiceCapture()
+                } else {
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             }
-            navController.navigate(BumbleRoutes.LIVE_CONVERSATION) {
-                launchSingleTop = true
-            }
-        } else {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
     val primaryNavItems = listOf(
         NavDestinationItem(BumbleRoutes.CORE_DASHBOARD, "Core", Icons.Default.Home, "nav_core"),
-        NavDestinationItem(BumbleRoutes.LIVE_CONVERSATION, "Live", Icons.Default.GraphicEq, "nav_live"),
+        NavDestinationItem(BumbleRoutes.ASSISTANT_CHAT, "Chat", Icons.AutoMirrored.Filled.Chat, "nav_chat"),
         NavDestinationItem(BumbleRoutes.VISION, "Vision", Icons.Default.CameraAlt, "nav_vision"),
         NavDestinationItem(BumbleRoutes.TOOLS, "Tools", Icons.Default.Build, "nav_tools"),
         NavDestinationItem(BumbleRoutes.SETTINGS, "Settings", Icons.Default.Settings, "nav_settings")
@@ -280,20 +277,20 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                         composable(BumbleRoutes.CORE_DASHBOARD) {
                             CoreDashboardScreen(
                                 coreState = coreState,
-                                connectionState = connectionState,
                                 wakeWordStatus = wakeWordStatus,
                                 statusBanner = statusBanner,
+                                partialVoiceText = partialVoiceText,
                                 audioAmplitude = audioAmplitude,
                                 settings = settings,
                                 hasApiKey = hasApiKey,
                                 hasMicPermission = viewModel.hasMicPermission(),
-                                latestEntry = transcript.lastOrNull(),
-                                onRequestMicAndStartLive = requestMicAndStartLive,
+                                latestEntry = messages.lastOrNull(),
+                                onTapCoreVoice = onTapVoiceAction,
                                 onSendQuickCommand = { cmd ->
-                                    viewModel.sendLiveText(cmd)
-                                    navigateTo(BumbleRoutes.LIVE_CONVERSATION)
+                                    viewModel.sendMessage(cmd)
+                                    navigateTo(BumbleRoutes.ASSISTANT_CHAT)
                                 },
-                                onNavigateToLive = { navigateTo(BumbleRoutes.LIVE_CONVERSATION) },
+                                onNavigateToChat = { navigateTo(BumbleRoutes.ASSISTANT_CHAT) },
                                 onNavigateToVision = { navigateTo(BumbleRoutes.VISION) },
                                 onNavigateToTools = { navigateTo(BumbleRoutes.TOOLS) },
                                 onNavigateToMemory = { navigateTo(BumbleRoutes.MEMORY) },
@@ -303,22 +300,21 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                             )
                         }
 
-                        composable(BumbleRoutes.LIVE_CONVERSATION) {
-                            LiveConversationScreen(
+                        composable(BumbleRoutes.ASSISTANT_CHAT) {
+                            AssistantChatScreen(
                                 coreState = coreState,
-                                connectionState = connectionState,
                                 statusBanner = statusBanner,
+                                partialVoiceText = partialVoiceText,
                                 audioAmplitude = audioAmplitude,
                                 settings = settings,
-                                transcript = transcript,
-                                isMicPaused = isMicPaused,
+                                messages = messages,
+                                isProcessing = isProcessing,
                                 isSpeakerMuted = isSpeakerMuted,
-                                onStartSession = requestMicAndStartLive,
-                                onEndSession = { viewModel.endLiveSession() },
-                                onToggleMicPause = { viewModel.toggleMicPause() },
+                                onTapVoice = onTapVoiceAction,
+                                onStopSpeaking = { viewModel.stopSpeaking() },
                                 onToggleSpeakerMute = { viewModel.toggleSpeakerMute() },
-                                onInterrupt = { viewModel.interruptBumble() },
-                                onSendText = { viewModel.sendLiveText(it) }
+                                onNewChat = { viewModel.startNewChat() },
+                                onSendText = { viewModel.sendMessage(it) }
                             )
                         }
 
@@ -381,10 +377,12 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                         composable(BumbleRoutes.VISION) {
                             VisionScreen(
                                 visionState = visionState,
-                                isLiveConnected = connectionState == LiveConnectionState.CONNECTED,
                                 onImageReady = { bmp, label -> viewModel.setVisionImage(bmp, label) },
                                 onAnalyze = { viewModel.analyzeVisionBitmap(it) },
-                                onSendToLive = { bmp, prompt -> viewModel.sendLiveImage(bmp, prompt) },
+                                onSendToChat = { bmp, prompt ->
+                                    viewModel.sendMessage(prompt, attachedBitmap = bmp)
+                                    navigateTo(BumbleRoutes.ASSISTANT_CHAT)
+                                },
                                 onVisionError = { viewModel.setVisionError(it) }
                             )
                         }

@@ -88,18 +88,20 @@ class ScreenCaptureService : Service() {
             val image = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
             hasCaptured = true
             try {
+                val imgWidth = image.width.coerceAtLeast(1)
+                val imgHeight = image.height.coerceAtLeast(1)
                 val plane = image.planes[0]
                 val buffer = plane.buffer
-                val pixelStride = plane.pixelStride
+                val pixelStride = plane.pixelStride.coerceAtLeast(1)
                 val rowStride = plane.rowStride
-                val rowPadding = rowStride - pixelStride * width
+                val rowPadding = (rowStride - pixelStride * imgWidth).coerceAtLeast(0)
                 val fullBitmap = Bitmap.createBitmap(
-                    width + rowPadding / pixelStride,
-                    height,
+                    imgWidth + rowPadding / pixelStride,
+                    imgHeight,
                     Bitmap.Config.ARGB_8888
                 )
                 fullBitmap.copyPixelsFromBuffer(buffer)
-                val cropped = Bitmap.createBitmap(fullBitmap, 0, 0, width, height)
+                val cropped = Bitmap.createBitmap(fullBitmap, 0, 0, imgWidth, imgHeight)
                 if (cropped != fullBitmap) fullBitmap.recycle()
 
                 handler.post {

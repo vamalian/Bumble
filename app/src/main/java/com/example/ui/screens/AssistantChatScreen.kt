@@ -22,13 +22,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PanTool
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,9 +49,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.example.ai.CoreState
-import com.example.ai.LiveConnectionState
 import com.example.data.local.BumbleSettings
-import com.example.ui.LiveTranscriptEntry
+import com.example.ui.ChatEntry
 import com.example.ui.components.HolographicCore
 import com.example.ui.components.HudTelemetryPill
 import com.example.ui.theme.BumbleCrimson
@@ -67,29 +65,28 @@ import com.example.ui.theme.BumbleTextSecondary
 import com.example.ui.theme.BumbleVoidBlack
 
 @Composable
-fun LiveConversationScreen(
+fun AssistantChatScreen(
     coreState: CoreState,
-    connectionState: LiveConnectionState,
     statusBanner: String,
+    partialVoiceText: String,
     audioAmplitude: Float,
     settings: BumbleSettings,
-    transcript: List<LiveTranscriptEntry>,
-    isMicPaused: Boolean,
+    messages: List<ChatEntry>,
+    isProcessing: Boolean,
     isSpeakerMuted: Boolean,
-    onStartSession: () -> Unit,
-    onEndSession: () -> Unit,
-    onToggleMicPause: () -> Unit,
+    onTapVoice: () -> Unit,
+    onStopSpeaking: () -> Unit,
     onToggleSpeakerMute: () -> Unit,
-    onInterrupt: () -> Unit,
+    onNewChat: () -> Unit,
     onSendText: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var messageInput by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(transcript.size) {
-        if (transcript.isNotEmpty()) {
-            listState.animateScrollToItem(transcript.lastIndex)
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
         }
     }
 
@@ -112,62 +109,65 @@ fun LiveConversationScreen(
                     audioAmplitude = audioAmplitude,
                     animationsEnabled = settings.animationsEnabled,
                     particleDensity = settings.particleDensity,
-                    onClick = {
-                        if (coreState == CoreState.SPEAKING) onInterrupt()
-                        else if (connectionState == LiveConnectionState.DISCONNECTED) onStartSession()
-                    },
-                    modifier = Modifier.size(88.dp)
+                    onClick = onTapVoice,
+                    modifier = Modifier.size(84.dp)
                 )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "GEMINI LIVE VOICE",
+                        text = "BUMBLE GEMINI",
                         style = MaterialTheme.typography.titleMedium,
                         color = BumbleGoldBright
                     )
                     HudTelemetryPill(
                         label = statusBanner.uppercase(),
-                        dotColor = when (connectionState) {
-                            LiveConnectionState.CONNECTED -> BumbleEmerald
-                            LiveConnectionState.ERROR -> BumbleCrimson
+                        dotColor = when (coreState) {
+                            CoreState.LISTENING, CoreState.SPEAKING -> BumbleEmerald
+                            CoreState.ERROR -> BumbleCrimson
                             else -> BumbleGold
                         }
                     )
                     Text(
-                        text = "${settings.liveModel.removePrefix("models/")} • ${settings.voiceName}",
+                        text = "${settings.geminiModel} • ${settings.voiceProfile}",
                         style = MaterialTheme.typography.labelSmall,
                         color = BumbleTextSecondary
                     )
+                }
+                IconButton(
+                    onClick = onNewChat,
+                    modifier = Modifier.testTag("new_chat_button")
+                ) {
+                    Icon(Icons.Default.AddComment, contentDescription = "New chat", tint = BumbleGold)
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Real-time Transcript Stream
+            // Conversation Feed
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (transcript.isEmpty()) {
+                if (messages.isEmpty()) {
                     item {
                         Surface(
                             shape = MaterialTheme.shapes.medium,
                             color = BumbleGraphite.copy(alpha = 0.7f),
                             border = BorderStroke(1.dp, BumbleHudBorder),
-                            modifier = Modifier.fillMaxWidth().padding(top = 24.dp)
+                            modifier = Modifier.fillMaxWidth().padding(top = 20.dp)
                         ) {
                             Column(
                                 modifier = Modifier.padding(20.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = "Real-Time Bidirectional Audio",
+                                    text = "Bumble Gemini Assistant",
                                     style = MaterialTheme.typography.titleMedium,
                                     color = BumbleGoldBright
                                 )
                                 Text(
-                                    text = "Tap Connect Live below to stream voice directly to Gemini Live. You can interrupt Bumble mid-sentence, execute Android actions by voice, or type commands below.",
+                                    text = "Ask anything by voice or text in English, Urdu, or Hindi. Bumble can open apps, check weather, calculate, save notes & reminders, search the web, and analyze images.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = BumbleTextSecondary
                                 )
@@ -175,85 +175,82 @@ fun LiveConversationScreen(
                         }
                     }
                 }
-                items(transcript, key = { it.id }) { entry ->
-                    TranscriptBubble(entry)
+                items(messages, key = { it.id }) { entry ->
+                    ChatBubble(entry)
+                }
+                if (partialVoiceText.isNotBlank()) {
+                    item {
+                        ChatBubble(
+                            ChatEntry(role = "user", text = "$partialVoiceText ...")
+                        )
+                    }
+                }
+                if (isProcessing) {
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = BumbleGold, strokeWidth = 2.dp)
+                            Text("Bumble is thinking...", style = MaterialTheme.typography.bodyMedium, color = BumbleGoldBright)
+                        }
+                    }
                 }
             }
 
-            // Voice Controls Bar
+            // Voice & Speech Controls Bar
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (connectionState == LiveConnectionState.DISCONNECTED || connectionState == LiveConnectionState.ERROR) {
-                    Button(
-                        onClick = onStartSession,
-                        colors = ButtonDefaults.buttonColors(containerColor = BumbleGold, contentColor = BumbleVoidBlack),
-                        modifier = Modifier.weight(1f).height(50.dp).testTag("live_connect_button")
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start Gemini Live")
-                    }
-                } else {
-                    FilledTonalIconButton(
-                        onClick = onToggleMicPause,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = if (isMicPaused) BumbleCrimson.copy(alpha = 0.25f) else BumbleGraphiteElevated
-                        ),
-                        modifier = Modifier.size(50.dp).testTag("live_pause_mic_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isMicPaused) Icons.Default.MicOff else Icons.Default.Mic,
-                            contentDescription = if (isMicPaused) "Resume Microphone" else "Pause Microphone",
-                            tint = if (isMicPaused) BumbleCrimson else BumbleGoldBright
-                        )
-                    }
+                Button(
+                    onClick = onTapVoice,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (coreState == CoreState.LISTENING) BumbleCrimson else BumbleGold,
+                        contentColor = if (coreState == CoreState.LISTENING) MaterialTheme.colorScheme.onError else BumbleVoidBlack
+                    ),
+                    modifier = Modifier.weight(1f).height(48.dp).testTag("chat_voice_button")
+                ) {
+                    Icon(
+                        imageVector = if (coreState == CoreState.LISTENING) Icons.Default.Stop else Icons.Default.Mic,
+                        contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (coreState == CoreState.LISTENING) "Stop Listening" else "Voice Input")
+                }
 
+                if (coreState == CoreState.SPEAKING) {
                     FilledTonalIconButton(
-                        onClick = onToggleSpeakerMute,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = if (isSpeakerMuted) BumbleCrimson.copy(alpha = 0.25f) else BumbleGraphiteElevated
-                        ),
-                        modifier = Modifier.size(50.dp).testTag("live_mute_speaker_button")
+                        onClick = onStopSpeaking,
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = BumbleCrimson.copy(alpha = 0.25f)),
+                        modifier = Modifier.size(48.dp).testTag("chat_stop_tts_button")
                     ) {
-                        Icon(
-                            imageVector = if (isSpeakerMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = if (isSpeakerMuted) "Unmute Audio" else "Mute Audio",
-                            tint = if (isSpeakerMuted) BumbleCrimson else BumbleGoldBright
-                        )
+                        Icon(Icons.Default.Stop, contentDescription = "Stop speaking", tint = BumbleCrimson)
                     }
+                }
 
-                    FilledTonalIconButton(
-                        onClick = onInterrupt,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = BumbleGraphiteElevated),
-                        modifier = Modifier.size(50.dp).testTag("live_interrupt_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PanTool,
-                            contentDescription = "Interrupt Bumble",
-                            tint = BumbleGold
-                        )
-                    }
-
-                    Button(
-                        onClick = onEndSession,
-                        colors = ButtonDefaults.buttonColors(containerColor = BumbleCrimson, contentColor = MaterialTheme.colorScheme.onError),
-                        modifier = Modifier.height(50.dp).testTag("live_end_button")
-                    ) {
-                        Icon(Icons.Default.CallEnd, contentDescription = "End Conversation")
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("End")
-                    }
+                FilledTonalIconButton(
+                    onClick = onToggleSpeakerMute,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = if (isSpeakerMuted) BumbleCrimson.copy(alpha = 0.25f) else BumbleGraphiteElevated
+                    ),
+                    modifier = Modifier.size(48.dp).testTag("chat_mute_tts_button")
+                ) {
+                    Icon(
+                        imageVector = if (isSpeakerMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = if (isSpeakerMuted) "Unmute voice reply" else "Mute voice reply",
+                        tint = if (isSpeakerMuted) BumbleCrimson else BumbleGoldBright
+                    )
                 }
             }
 
-            // Text / Command Fallback Bar inside Live Screen
+            // Text Input Bar
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = { messageInput = it },
-                placeholder = { Text("Type message into Live stream...") },
+                placeholder = { Text("Message Bumble Gemini...") },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = BumbleGold,
@@ -270,7 +267,7 @@ fun LiveConversationScreen(
                                 onSendText(msg)
                             }
                         },
-                        modifier = Modifier.testTag("live_send_text_button")
+                        modifier = Modifier.testTag("chat_send_text_button")
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send text", tint = BumbleGold)
                     }
@@ -283,14 +280,14 @@ fun LiveConversationScreen(
                         onSendText(msg)
                     }
                 }),
-                modifier = Modifier.fillMaxWidth().testTag("live_text_input")
+                modifier = Modifier.fillMaxWidth().testTag("chat_text_input")
             )
         }
     }
 }
 
 @Composable
-private fun TranscriptBubble(entry: LiveTranscriptEntry) {
+private fun ChatBubble(entry: ChatEntry) {
     val isUser = entry.role == "user"
     val isTool = entry.role == "tool"
     val isSystem = entry.role == "system"

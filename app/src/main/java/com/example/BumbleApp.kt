@@ -1,8 +1,9 @@
 package com.example
 
 import android.app.Application
-import com.example.ai.AudioEngine
 import com.example.ai.GeminiRestClient
+import com.example.ai.VoiceInputManager
+import com.example.ai.VoiceOutputManager
 import com.example.ai.WakeWordManager
 import com.example.assistant.AndroidActionExecutor
 import com.example.assistant.ExternalToolsClient
@@ -17,7 +18,8 @@ class BumbleApp : Application() {
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
     val externalTools: ExternalToolsClient by lazy { ExternalToolsClient() }
     val geminiRestClient: GeminiRestClient by lazy { GeminiRestClient() }
-    val audioEngine: AudioEngine by lazy { AudioEngine() }
+    val voiceInputManager: VoiceInputManager by lazy { VoiceInputManager(this) }
+    val voiceOutputManager: VoiceOutputManager by lazy { VoiceOutputManager(this) }
     val wakeWordManager: WakeWordManager by lazy { WakeWordManager(this) }
 
     val actionExecutor: AndroidActionExecutor by lazy {

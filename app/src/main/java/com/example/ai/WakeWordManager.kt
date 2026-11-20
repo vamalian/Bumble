@@ -24,7 +24,7 @@ enum class WakeWordStatus {
 /**
  * Foreground-only "Hey Bumble" wake-word listener.
  * Strictly stops and destroys SpeechRecognizer when the app is paused/backgrounded
- * or when Gemini Live takes exclusive microphone ownership.
+ * or when active voice command capture takes microphone ownership.
  */
 class WakeWordManager(private val context: Context) {
 
@@ -50,7 +50,9 @@ class WakeWordManager(private val context: Context) {
             if (isActive) return@post
             isActive = true
             _status.value = WakeWordStatus.STANDBY_LISTENING
-            createAndStartRecognizer()
+            mainHandler.postDelayed({
+                if (isActive) createAndStartRecognizer()
+            }, 250L)
         }
     }
 
@@ -94,7 +96,7 @@ class WakeWordManager(private val context: Context) {
                             _status.value = WakeWordStatus.DISABLED
                             return
                         }
-                        else -> 700L
+                        else -> 800L
                     }
                     scheduleRestart(delay)
                 }
@@ -104,7 +106,7 @@ class WakeWordManager(private val context: Context) {
                     if (matchesWakePhrase(matches)) {
                         triggerWake()
                     } else if (isActive) {
-                        scheduleRestart(350L)
+                        scheduleRestart(400L)
                     }
                 }
 
@@ -148,7 +150,9 @@ class WakeWordManager(private val context: Context) {
         isActive = false
         _status.value = WakeWordStatus.TRIGGERED
         destroyRecognizer()
-        onWakeDetectedCallback?.invoke()
+        mainHandler.postDelayed({
+            onWakeDetectedCallback?.invoke()
+        }, 180L)
     }
 
     private fun scheduleRestart(delayMs: Long) {

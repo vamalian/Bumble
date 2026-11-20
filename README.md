@@ -1,6 +1,6 @@
 # Bumble AI — Native Android JARVIS-Style Assistant
 
-**Bumble AI** is a native Kotlin + Jetpack Compose Android assistant powered by Google's **Gemini Live API** (`BidiGenerateContent` WebSocket) and **Gemini Multimodal Vision**, featuring a golden holographic JARVIS-inspired HUD core.
+**Bumble AI** is a native Kotlin + Jetpack Compose Android assistant powered by Google's **Gemini API** (`generateContent` with multi-turn chat, function calling, and multimodal vision), featuring a golden holographic JARVIS-inspired HUD core.
 
 ## Core Capabilities
 
@@ -8,10 +8,9 @@
    - Custom Jetpack Compose `Canvas` core with rotating segmented HUD rings, counter-rotating telemetry ticks, orbiting glowing particles, and a 64-bar audio-reactive circular waveform.
    - Distinct animated states: `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, and `ERROR`.
 
-2. **Gemini Live Bidirectional Audio (`GeminiLiveClient` + `AudioEngine`)**
-   - Real-time 16 kHz PCM mono microphone capture with hardware `AcousticEchoCanceler` and `NoiseSuppressor`.
-   - Real-time 24 kHz PCM mono voice playback with instant barge-in interruption (`interruptPlayback()`).
-   - Live input & output audio transcriptions, automatic reconnection with exponential backoff, configurable voices (`Kore`, `Puck`, `Charon`, `Fenrir`, `Aoede`, `Zephyr`), personalities, and multilingual support (English, Urdu, Hindi, and mixed code-switching).
+2. **Normal Gemini Assistant & Voice I/O (`GeminiRestClient` + `VoiceInputManager` + `VoiceOutputManager`)**
+   - Multi-turn text & voice conversations via Google Gemini REST API (`gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-pro`, or custom model ID) with multi-round function calling.
+   - Foreground Android `SpeechRecognizer` voice capture with RMS audio-reactive core telemetry and Android `TextToSpeech` spoken replies with configurable voice profiles, personalities, and multilingual support (English, Urdu, Hindi, and mixed code-switching).
 
 3. **Foreground-Only `"Hey Bumble"` Wake Word (`WakeWordManager`)**
    - Listens strictly while the app is open and `RESUMED`.

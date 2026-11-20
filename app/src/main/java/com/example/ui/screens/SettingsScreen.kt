@@ -38,7 +38,10 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -78,8 +82,17 @@ fun SettingsScreen(
 ) {
     var apiKeyDraft by remember { mutableStateOf("") }
     var showKeyPlaintext by remember { mutableStateOf(false) }
-    var customLiveModel by remember(settings.liveModel) { mutableStateOf(settings.liveModel) }
-    var customPromptDraft by remember(settings.customSystemPrompt) { mutableStateOf(settings.customSystemPrompt) }
+    var customGeminiModel by remember { mutableStateOf(settings.geminiModel) }
+    var customPromptDraft by remember { mutableStateOf(settings.customSystemPrompt) }
+
+    LaunchedEffect(settings.geminiModel) {
+        customGeminiModel = settings.geminiModel
+    }
+    LaunchedEffect(settings.customSystemPrompt) {
+        if (customPromptDraft.isEmpty() && settings.customSystemPrompt.isNotEmpty()) {
+            customPromptDraft = settings.customSystemPrompt
+        }
+    }
 
     Column(
         modifier = modifier
@@ -182,28 +195,42 @@ fun SettingsScreen(
 
             // 2. Gemini Models
             HudPanel(modifier = Modifier.fillMaxWidth()) {
-                Text("GEMINI LIVE & VISION MODELS", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
-                Text("Live Audio Model", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
+                Text("GEMINI MODELS", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
+                Text("Assistant & Chat Model", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BumbleSettings.LIVE_MODEL_OPTIONS.forEach { m ->
+                    BumbleSettings.GEMINI_MODEL_OPTIONS.forEach { m ->
                         FilterChip(
-                            selected = settings.liveModel == m,
-                            onClick = { onUpdateSettings { it.copy(liveModel = m) } },
-                            label = { Text(m.removePrefix("models/"), style = MaterialTheme.typography.labelSmall) },
+                            selected = settings.geminiModel == m,
+                            onClick = { onUpdateSettings { it.copy(geminiModel = m) } },
+                            label = { Text(m, style = MaterialTheme.typography.labelSmall) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BumbleGold, selectedLabelColor = BumbleVoidBlack)
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = customLiveModel,
-                    onValueChange = {
-                        customLiveModel = it
-                        onUpdateSettings { s -> s.copy(liveModel = it) }
-                    },
-                    label = { Text("Custom Live Model ID") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = customGeminiModel,
+                        onValueChange = { customGeminiModel = it },
+                        label = { Text("Custom Gemini Model ID") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            onUpdateSettings { s -> s.copy(geminiModel = customGeminiModel) }
+                        }),
+                        modifier = Modifier.weight(1f).testTag("custom_model_input")
+                    )
+                    OutlinedButton(
+                        onClick = { onUpdateSettings { s -> s.copy(geminiModel = customGeminiModel) } },
+                        border = BorderStroke(1.dp, BumbleGold),
+                        modifier = Modifier.testTag("apply_custom_model_button")
+                    ) {
+                        Text("Apply", color = BumbleGoldBright)
+                    }
+                }
 
                 Text("Vision & Tools Model", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -221,12 +248,19 @@ fun SettingsScreen(
             // 3. Voice, Language & Personality
             HudPanel(modifier = Modifier.fillMaxWidth()) {
                 Text("VOICE, LANGUAGE & PERSONALITY", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
-                Text("Gemini Live Voice", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
+                SettingToggleRow(
+                    title = "Speak Replies Automatically",
+                    subtitle = "Read Gemini responses aloud with Android Text-to-Speech.",
+                    checked = settings.autoSpeakReplies,
+                    onCheckedChange = { enabled -> onUpdateSettings { it.copy(autoSpeakReplies = enabled) } }
+                )
+
+                Text("Voice Profile", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BumbleSettings.VOICE_OPTIONS.forEach { v ->
+                    BumbleSettings.VOICE_PROFILES.forEach { v ->
                         FilterChip(
-                            selected = settings.voiceName == v,
-                            onClick = { onUpdateSettings { it.copy(voiceName = v) } },
+                            selected = settings.voiceProfile == v,
+                            onClick = { onUpdateSettings { it.copy(voiceProfile = v) } },
                             label = { Text(v) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BumbleGold, selectedLabelColor = BumbleVoidBlack)
                         )
@@ -303,7 +337,7 @@ fun SettingsScreen(
                 Text("HISTORY, MEMORY & PRIVACY", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
                 SettingToggleRow(
                     title = "Save Conversation History",
-                    subtitle = "Persist session transcripts locally in encrypted app database.",
+                    subtitle = "Persist session transcripts locally in app database.",
                     checked = settings.saveConversationHistory,
                     onCheckedChange = { enabled -> onUpdateSettings { it.copy(saveConversationHistory = enabled) } }
                 )

@@ -89,7 +89,7 @@ fun MemoryScreen(
                 }
             }
             Text(
-                text = "Only user-approved memories are injected into Gemini Live context. All storage remains strictly on your device.",
+                text = "Only user-approved memories are injected into Gemini context. All storage remains strictly on your device.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = BumbleTextSecondary
             )

@@ -137,10 +137,10 @@ fun HolographicCore(
     }
 
     val stateDesc = when (coreState) {
-        CoreState.IDLE -> "Bumble Core Idle. Tap to start Gemini Live."
-        CoreState.LISTENING -> "Bumble Core Listening. Tap to interrupt or pause."
+        CoreState.IDLE -> "Bumble Core Idle. Tap to speak to Gemini."
+        CoreState.LISTENING -> "Bumble Core Listening. Tap to stop listening."
         CoreState.THINKING -> "Bumble Core Thinking."
-        CoreState.SPEAKING -> "Bumble Core Speaking. Tap to interrupt."
+        CoreState.SPEAKING -> "Bumble Core Speaking. Tap to stop speaking."
         CoreState.ERROR -> "Bumble Core Error. Tap to configure or retry."
     }
 

@@ -8,10 +8,10 @@ enum class CoreState {
     ERROR
 }
 
-enum class LiveConnectionState {
-    DISCONNECTED,
-    CONNECTING,
-    CONNECTED,
-    RECONNECTING,
+enum class AssistantStatus {
+    READY,
+    LISTENING,
+    PROCESSING,
+    SPEAKING,
     ERROR
 }
