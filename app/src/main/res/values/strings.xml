@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Bumble AI</string>
+    <string name="notification_listener_description">Allows Bumble AI to read recent notifications only when you explicitly ask during an active session.</string>
+    <string name="screen_capture_notification_title">Bumble Vision Screen Capture</string>
+    <string name="screen_capture_notification_text">Capturing a single frame for your active Gemini Vision query.</string>
+</resources>
