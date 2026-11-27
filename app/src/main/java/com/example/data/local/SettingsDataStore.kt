@@ -14,14 +14,15 @@ import kotlinx.coroutines.flow.map
 private val Context.bumbleDataStore: DataStore<Preferences> by preferencesDataStore(name = "bumble_settings")
 
 data class BumbleSettings(
-    val geminiModel: String = DEFAULT_GEMINI_MODEL,
+    val liveModel: String = DEFAULT_LIVE_MODEL,
     val visionModel: String = DEFAULT_VISION_MODEL,
-    val voiceProfile: String = "JARVIS Crisp",
-    val autoSpeakReplies: Boolean = true,
+    val liveVoice: String = DEFAULT_LIVE_VOICE,
     val languageMode: String = "Multilingual (EN / UR / HI)",
     val personality: String = "JARVIS Tactical",
     val customSystemPrompt: String = "",
     val wakeWordEnabled: Boolean = true,
+    val autoReconnect: Boolean = true,
+    val voiceBargeInEnabled: Boolean = true,
     val animationsEnabled: Boolean = true,
     val particleDensity: Float = 1.0f,
     val saveConversationHistory: Boolean = true,
@@ -29,27 +30,31 @@ data class BumbleSettings(
     val allowScreenCaptureTool: Boolean = false
 ) {
     companion object {
-        const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-        const val DEFAULT_VISION_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview"
+        const val DEFAULT_VISION_MODEL = "gemini-3.8-flash"
+        const val DEFAULT_LIVE_VOICE = "Kore"
 
-        val GEMINI_MODEL_OPTIONS = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-pro"
+        val LIVE_MODEL_OPTIONS = listOf(
+            "gemini-3.1-flash-live-preview",
+            "gemini-2.5-flash-native-audio-preview-12-2025",
+            "gemini-2.5-flash-native-audio-preview-09-2025"
         )
 
         val VISION_MODEL_OPTIONS = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash-lite"
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-3.5-flash-lite"
         )
 
-        val VOICE_PROFILES = listOf(
-            "JARVIS Crisp",
-            "Deep Tactical",
-            "Warm Balanced",
-            "Bright Fast",
-            "Calm Natural"
+        val LIVE_VOICE_OPTIONS = listOf(
+            "Kore",
+            "Puck",
+            "Charon",
+            "Fenrir",
+            "Aoede",
+            "Zephyr",
+            "Orus",
+            "Leda"
         )
 
         val LANGUAGE_OPTIONS = listOf(
@@ -67,15 +72,33 @@ data class BumbleSettings(
             "Custom"
         )
 
-        fun sanitizeModelId(raw: String?): String {
-            val trimmed = raw?.trim().orEmpty()
-            if (trimmed.isBlank() ||
-                trimmed.contains("native-audio", ignoreCase = true) ||
-                trimmed.contains("-live-", ignoreCase = true)
+        fun sanitizeLiveModelId(raw: String?): String {
+            val cleaned = raw?.trim().orEmpty().removePrefix("models/")
+            if (cleaned.isBlank() ||
+                cleaned.startsWith("gemini-1.5-", ignoreCase = true) ||
+                cleaned.startsWith("gemini-2.0-", ignoreCase = true) ||
+                cleaned.equals("gemini-pro", ignoreCase = true)
             ) {
-                return DEFAULT_GEMINI_MODEL
+                return DEFAULT_LIVE_MODEL
             }
-            return trimmed.removePrefix("models/")
+            val supportsLive = cleaned.contains("live", ignoreCase = true) ||
+                cleaned.contains("native-audio", ignoreCase = true)
+            return if (supportsLive) cleaned else DEFAULT_LIVE_MODEL
+        }
+
+        fun sanitizeVisionModelId(raw: String?): String {
+            val cleaned = raw?.trim().orEmpty().removePrefix("models/")
+            if (cleaned.isBlank() ||
+                cleaned.contains("native-audio", ignoreCase = true) ||
+                cleaned.contains("-live-", ignoreCase = true) ||
+                cleaned.startsWith("gemini-1.5-", ignoreCase = true) ||
+                cleaned.startsWith("gemini-2.0-", ignoreCase = true) ||
+                cleaned.startsWith("gemini-2.5-", ignoreCase = true) ||
+                cleaned.equals("gemini-pro", ignoreCase = true)
+            ) {
+                return DEFAULT_VISION_MODEL
+            }
+            return cleaned
         }
     }
 }
@@ -83,14 +106,16 @@ data class BumbleSettings(
 class SettingsDataStore(private val context: Context) {
 
     private object Keys {
-        val GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val LIVE_MODEL = stringPreferencesKey("live_model")
+        val LEGACY_GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val VISION_MODEL = stringPreferencesKey("vision_model")
-        val VOICE_PROFILE = stringPreferencesKey("voice_profile")
-        val AUTO_SPEAK = booleanPreferencesKey("auto_speak_replies")
+        val LIVE_VOICE = stringPreferencesKey("live_voice")
         val LANGUAGE_MODE = stringPreferencesKey("language_mode")
         val PERSONALITY = stringPreferencesKey("personality")
         val CUSTOM_PROMPT = stringPreferencesKey("custom_prompt")
         val WAKE_WORD = booleanPreferencesKey("wake_word_enabled")
+        val AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")
+        val BARGE_IN = booleanPreferencesKey("voice_barge_in_enabled")
         val ANIMATIONS = booleanPreferencesKey("animations_enabled")
         val PARTICLE_DENSITY = floatPreferencesKey("particle_density")
         val SAVE_HISTORY = booleanPreferencesKey("save_history")
@@ -99,15 +124,23 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val settingsFlow: Flow<BumbleSettings> = context.bumbleDataStore.data.map { prefs ->
+        val rawLive = prefs[Keys.LIVE_MODEL] ?: prefs[Keys.LEGACY_GEMINI_MODEL]
+        val voiceRaw = prefs[Keys.LIVE_VOICE]
+        val validVoice = if (voiceRaw in BumbleSettings.LIVE_VOICE_OPTIONS) {
+            voiceRaw!!
+        } else {
+            BumbleSettings.DEFAULT_LIVE_VOICE
+        }
         BumbleSettings(
-            geminiModel = BumbleSettings.sanitizeModelId(prefs[Keys.GEMINI_MODEL]),
-            visionModel = BumbleSettings.sanitizeModelId(prefs[Keys.VISION_MODEL]),
-            voiceProfile = prefs[Keys.VOICE_PROFILE] ?: "JARVIS Crisp",
-            autoSpeakReplies = prefs[Keys.AUTO_SPEAK] ?: true,
+            liveModel = BumbleSettings.sanitizeLiveModelId(rawLive),
+            visionModel = BumbleSettings.sanitizeVisionModelId(prefs[Keys.VISION_MODEL]),
+            liveVoice = validVoice,
             languageMode = prefs[Keys.LANGUAGE_MODE] ?: "Multilingual (EN / UR / HI)",
             personality = prefs[Keys.PERSONALITY] ?: "JARVIS Tactical",
             customSystemPrompt = prefs[Keys.CUSTOM_PROMPT] ?: "",
             wakeWordEnabled = prefs[Keys.WAKE_WORD] ?: true,
+            autoReconnect = prefs[Keys.AUTO_RECONNECT] ?: true,
+            voiceBargeInEnabled = prefs[Keys.BARGE_IN] ?: true,
             animationsEnabled = prefs[Keys.ANIMATIONS] ?: true,
             particleDensity = prefs[Keys.PARTICLE_DENSITY] ?: 1.0f,
             saveConversationHistory = prefs[Keys.SAVE_HISTORY] ?: true,
@@ -118,15 +151,23 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun updateSettings(transform: (BumbleSettings) -> BumbleSettings) {
         context.bumbleDataStore.edit { prefs ->
+            val rawLive = prefs[Keys.LIVE_MODEL] ?: prefs[Keys.LEGACY_GEMINI_MODEL]
+            val voiceRaw = prefs[Keys.LIVE_VOICE]
+            val validVoice = if (voiceRaw in BumbleSettings.LIVE_VOICE_OPTIONS) {
+                voiceRaw!!
+            } else {
+                BumbleSettings.DEFAULT_LIVE_VOICE
+            }
             val current = BumbleSettings(
-                geminiModel = BumbleSettings.sanitizeModelId(prefs[Keys.GEMINI_MODEL]),
-                visionModel = BumbleSettings.sanitizeModelId(prefs[Keys.VISION_MODEL]),
-                voiceProfile = prefs[Keys.VOICE_PROFILE] ?: "JARVIS Crisp",
-                autoSpeakReplies = prefs[Keys.AUTO_SPEAK] ?: true,
+                liveModel = BumbleSettings.sanitizeLiveModelId(rawLive),
+                visionModel = BumbleSettings.sanitizeVisionModelId(prefs[Keys.VISION_MODEL]),
+                liveVoice = validVoice,
                 languageMode = prefs[Keys.LANGUAGE_MODE] ?: "Multilingual (EN / UR / HI)",
                 personality = prefs[Keys.PERSONALITY] ?: "JARVIS Tactical",
                 customSystemPrompt = prefs[Keys.CUSTOM_PROMPT] ?: "",
                 wakeWordEnabled = prefs[Keys.WAKE_WORD] ?: true,
+                autoReconnect = prefs[Keys.AUTO_RECONNECT] ?: true,
+                voiceBargeInEnabled = prefs[Keys.BARGE_IN] ?: true,
                 animationsEnabled = prefs[Keys.ANIMATIONS] ?: true,
                 particleDensity = prefs[Keys.PARTICLE_DENSITY] ?: 1.0f,
                 saveConversationHistory = prefs[Keys.SAVE_HISTORY] ?: true,
@@ -134,14 +175,19 @@ class SettingsDataStore(private val context: Context) {
                 allowScreenCaptureTool = prefs[Keys.ALLOW_SCREEN_CAPTURE] ?: false
             )
             val updated = transform(current)
-            prefs[Keys.GEMINI_MODEL] = BumbleSettings.sanitizeModelId(updated.geminiModel)
-            prefs[Keys.VISION_MODEL] = BumbleSettings.sanitizeModelId(updated.visionModel)
-            prefs[Keys.VOICE_PROFILE] = updated.voiceProfile
-            prefs[Keys.AUTO_SPEAK] = updated.autoSpeakReplies
+            prefs[Keys.LIVE_MODEL] = BumbleSettings.sanitizeLiveModelId(updated.liveModel)
+            prefs[Keys.VISION_MODEL] = BumbleSettings.sanitizeVisionModelId(updated.visionModel)
+            prefs[Keys.LIVE_VOICE] = if (updated.liveVoice in BumbleSettings.LIVE_VOICE_OPTIONS) {
+                updated.liveVoice
+            } else {
+                BumbleSettings.DEFAULT_LIVE_VOICE
+            }
             prefs[Keys.LANGUAGE_MODE] = updated.languageMode
             prefs[Keys.PERSONALITY] = updated.personality
             prefs[Keys.CUSTOM_PROMPT] = updated.customSystemPrompt
             prefs[Keys.WAKE_WORD] = updated.wakeWordEnabled
+            prefs[Keys.AUTO_RECONNECT] = updated.autoReconnect
+            prefs[Keys.BARGE_IN] = updated.voiceBargeInEnabled
             prefs[Keys.ANIMATIONS] = updated.animationsEnabled
             prefs[Keys.PARTICLE_DENSITY] = updated.particleDensity
             prefs[Keys.SAVE_HISTORY] = updated.saveConversationHistory

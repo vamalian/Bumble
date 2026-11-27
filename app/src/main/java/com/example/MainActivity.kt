@@ -56,6 +56,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.ai.CoreState
 import com.example.ui.BumbleViewModel
 import com.example.ui.components.HudBackdrop
+import com.example.ui.screens.AdminScreen
 import com.example.ui.screens.AssistantChatScreen
 import com.example.ui.screens.CoreDashboardScreen
 import com.example.ui.screens.HistoryScreen
@@ -80,6 +81,7 @@ object BumbleRoutes {
     const val HISTORY = "history"
     const val SETTINGS = "settings"
     const val PRIVACY = "privacy"
+    const val ADMIN = "owner_admin"
 }
 
 private data class NavDestinationItem(
@@ -117,18 +119,24 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
     val app = context.applicationContext as BumbleApp
 
     val coreState by viewModel.coreState.collectAsStateWithLifecycle()
+    val liveDiagnostics by viewModel.liveDiagnostics.collectAsStateWithLifecycle()
     val wakeWordStatus by viewModel.wakeWordStatus.collectAsStateWithLifecycle()
     val statusBanner by viewModel.statusBanner.collectAsStateWithLifecycle()
-    val partialVoiceText by viewModel.partialVoiceText.collectAsStateWithLifecycle()
+    val liveInputTranscript by viewModel.liveInputTranscript.collectAsStateWithLifecycle()
+    val liveOutputTranscript by viewModel.liveOutputTranscript.collectAsStateWithLifecycle()
     val audioAmplitude by viewModel.audioAmplitude.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
-    val isProcessing by viewModel.isProcessing.collectAsStateWithLifecycle()
+    val isProcessing by viewModel.isProcessingTurn.collectAsStateWithLifecycle()
+    val isMicMuted by viewModel.isMicMuted.collectAsStateWithLifecycle()
     val isSpeakerMuted by viewModel.isSpeakerMuted.collectAsStateWithLifecycle()
     val hasApiKey by viewModel.hasApiKey.collectAsStateWithLifecycle()
     val maskedApiKey by viewModel.maskedApiKey.collectAsStateWithLifecycle()
     val isTestingConnection by viewModel.isTestingConnection.collectAsStateWithLifecycle()
     val connectionTestResult by viewModel.connectionTestResult.collectAsStateWithLifecycle()
+    val recentApiErrors by viewModel.recentApiErrors.collectAsStateWithLifecycle()
+    val privacySafeStats by viewModel.privacySafeStats.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminState.collectAsStateWithLifecycle()
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val selectedSessionMessages by viewModel.selectedSessionMessages.collectAsStateWithLifecycle()
     val memories by viewModel.memories.collectAsStateWithLifecycle()
@@ -155,25 +163,24 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
     ) { granted ->
         viewModel.evaluateWakeWordStandby()
         if (granted) {
-            viewModel.startVoiceCapture()
+            viewModel.startLiveSession()
         } else {
-            navController.navigate(BumbleRoutes.ASSISTANT_CHAT) {
-                launchSingleTop = true
-            }
+            // Updates state/banner cleanly with actionable permission error
+            viewModel.startLiveSession()
         }
     }
 
     val onTapVoiceAction: () -> Unit = {
         when (coreState) {
-            CoreState.LISTENING -> viewModel.stopVoiceCapture()
+            CoreState.CONNECTING, CoreState.LISTENING -> viewModel.stopLiveSession()
             CoreState.SPEAKING -> viewModel.stopSpeaking()
-            else -> {
+            CoreState.IDLE, CoreState.PROCESSING, CoreState.ERROR -> {
                 val granted = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED
                 if (granted) {
-                    viewModel.startVoiceCapture()
+                    viewModel.startLiveSession()
                 } else {
                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -216,7 +223,7 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                 containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets.safeDrawing,
                 bottomBar = {
-                    if (!useRail) {
+                    if (!useRail && currentRoute != BumbleRoutes.ADMIN) {
                         NavigationBar(
                             containerColor = BumbleGraphite.copy(alpha = 0.96f),
                             modifier = Modifier.navigationBarsPadding()
@@ -247,7 +254,7 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    if (useRail) {
+                    if (useRail && currentRoute != BumbleRoutes.ADMIN) {
                         NavigationRail(containerColor = BumbleGraphite.copy(alpha = 0.94f)) {
                             allRailItems.forEach { item ->
                                 val selected = currentRoute == item.route
@@ -277,15 +284,22 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                         composable(BumbleRoutes.CORE_DASHBOARD) {
                             CoreDashboardScreen(
                                 coreState = coreState,
+                                liveDiagnostics = liveDiagnostics,
                                 wakeWordStatus = wakeWordStatus,
                                 statusBanner = statusBanner,
-                                partialVoiceText = partialVoiceText,
+                                liveInputTranscript = liveInputTranscript,
+                                liveOutputTranscript = liveOutputTranscript,
                                 audioAmplitude = audioAmplitude,
                                 settings = settings,
                                 hasApiKey = hasApiKey,
                                 hasMicPermission = viewModel.hasMicPermission(),
+                                isMicMuted = isMicMuted,
+                                isSpeakerMuted = isSpeakerMuted,
                                 latestEntry = messages.lastOrNull(),
                                 onTapCoreVoice = onTapVoiceAction,
+                                onRetryConnection = { viewModel.retryLiveConnection() },
+                                onToggleMicMute = { viewModel.toggleMicMute() },
+                                onToggleSpeakerMute = { viewModel.toggleSpeakerMute() },
                                 onSendQuickCommand = { cmd ->
                                     viewModel.sendMessage(cmd)
                                     navigateTo(BumbleRoutes.ASSISTANT_CHAT)
@@ -303,15 +317,20 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                         composable(BumbleRoutes.ASSISTANT_CHAT) {
                             AssistantChatScreen(
                                 coreState = coreState,
+                                liveDiagnostics = liveDiagnostics,
                                 statusBanner = statusBanner,
-                                partialVoiceText = partialVoiceText,
+                                liveInputTranscript = liveInputTranscript,
+                                liveOutputTranscript = liveOutputTranscript,
                                 audioAmplitude = audioAmplitude,
                                 settings = settings,
                                 messages = messages,
                                 isProcessing = isProcessing,
+                                isMicMuted = isMicMuted,
                                 isSpeakerMuted = isSpeakerMuted,
                                 onTapVoice = onTapVoiceAction,
+                                onRetryConnection = { viewModel.retryLiveConnection() },
                                 onStopSpeaking = { viewModel.stopSpeaking() },
+                                onToggleMicMute = { viewModel.toggleMicMute() },
                                 onToggleSpeakerMute = { viewModel.toggleSpeakerMute() },
                                 onNewChat = { viewModel.startNewChat() },
                                 onSendText = { viewModel.sendMessage(it) }
@@ -400,7 +419,12 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                                 onUpdateSettings = { viewModel.updateSettings(it) },
                                 onClearHistory = { viewModel.clearAllHistory() },
                                 onClearMemories = { viewModel.clearAllMemories() },
-                                onNavigateToPrivacy = { navigateTo(BumbleRoutes.PRIVACY) }
+                                onNavigateToPrivacy = { navigateTo(BumbleRoutes.PRIVACY) },
+                                onNavigateToAdmin = {
+                                    navController.navigate(BumbleRoutes.ADMIN) {
+                                        launchSingleTop = true
+                                    }
+                                }
                             )
                         }
 
@@ -408,6 +432,35 @@ private fun BumbleRootShell(viewModel: BumbleViewModel) {
                             PrivacyDashboardScreen(
                                 onPermissionStatusChanged = { viewModel.evaluateWakeWordStandby() },
                                 onClearAllLocalData = { viewModel.clearAllLocalData() }
+                            )
+                        }
+
+                        composable(BumbleRoutes.ADMIN) {
+                            AdminScreen(
+                                adminState = adminState,
+                                liveDiagnostics = liveDiagnostics,
+                                recentErrors = recentApiErrors,
+                                stats = privacySafeStats,
+                                settings = settings,
+                                hasApiKey = hasApiKey,
+                                maskedApiKey = maskedApiKey,
+                                isTestingRest = isTestingConnection,
+                                restConnectionResult = connectionTestResult,
+                                wakeWordStatus = wakeWordStatus,
+                                onLogin = { viewModel.loginAdmin(it) },
+                                onLogout = { viewModel.logoutAdmin("Signed out by owner.") },
+                                onTouchSession = { viewModel.touchAdminSession() },
+                                onChangePassword = { cur, next, conf ->
+                                    viewModel.changeAdminPassword(cur, next, conf)
+                                },
+                                onTestLiveHandshake = { viewModel.testLiveConnectionAdmin() },
+                                onTestRestConnection = { viewModel.testApiConnection() },
+                                onRunMicTest = { viewModel.runMicDiagnostic() },
+                                onRunSpeakerTest = { viewModel.runSpeakerDiagnostic() },
+                                onSaveApiKey = { viewModel.saveApiKey(it) },
+                                onClearApiKey = { viewModel.clearApiKey() },
+                                onUpdateSettings = { viewModel.updateSettings(it) },
+                                onBack = { navController.popBackStack() }
                             )
                         }
                     }

@@ -74,7 +74,8 @@ fun HolographicCore(
     val primaryRingColor by animateColorAsState(
         targetValue = when (coreState) {
             CoreState.ERROR -> BumbleCrimson
-            CoreState.THINKING -> BumbleGoldBright
+            CoreState.CONNECTING -> BumbleAmber
+            CoreState.PROCESSING -> BumbleGoldBright
             CoreState.SPEAKING -> BumbleChampagne
             else -> BumbleGold
         },
@@ -137,11 +138,12 @@ fun HolographicCore(
     }
 
     val stateDesc = when (coreState) {
-        CoreState.IDLE -> "Bumble Core Idle. Tap to speak to Gemini."
-        CoreState.LISTENING -> "Bumble Core Listening. Tap to stop listening."
-        CoreState.THINKING -> "Bumble Core Thinking."
-        CoreState.SPEAKING -> "Bumble Core Speaking. Tap to stop speaking."
-        CoreState.ERROR -> "Bumble Core Error. Tap to configure or retry."
+        CoreState.IDLE -> "Bumble Core Idle. Tap to start Gemini Live session."
+        CoreState.CONNECTING -> "Bumble Core Connecting to Gemini Live."
+        CoreState.LISTENING -> "Bumble Core Listening. Tap to stop live session."
+        CoreState.PROCESSING -> "Bumble Core Processing."
+        CoreState.SPEAKING -> "Bumble Core Speaking. Tap to interrupt playback."
+        CoreState.ERROR -> "Bumble Core Error. Tap to retry or configure."
     }
 
     val interactionSource = remember { MutableInteractionSource() }
@@ -165,8 +167,9 @@ fun HolographicCore(
             val animScale = if (animationsEnabled) {
                 when (coreState) {
                     CoreState.IDLE -> 0.98f + (pulse - 1f) * 0.4f
+                    CoreState.CONNECTING -> 0.99f + (pulse - 1f) * 0.65f
                     CoreState.LISTENING -> 1.0f + (pulse - 1f) * 0.7f + smoothedAmp * 0.08f
-                    CoreState.THINKING -> 1.02f + (pulse - 1f) * 0.9f
+                    CoreState.PROCESSING -> 1.02f + (pulse - 1f) * 0.9f
                     CoreState.SPEAKING -> 1.02f + smoothedAmp * 0.14f
                     CoreState.ERROR -> 0.97f
                 }
@@ -180,7 +183,8 @@ fun HolographicCore(
             val nucleusRadius = minDim * 0.155f * animScale
 
             val rotMultiplier = when (coreState) {
-                CoreState.THINKING -> 2.1f
+                CoreState.PROCESSING -> 2.1f
+                CoreState.CONNECTING -> 1.7f
                 CoreState.SPEAKING -> 1.5f
                 CoreState.LISTENING -> 1.25f
                 else -> 1.0f
@@ -278,9 +282,10 @@ fun HolographicCore(
             // 4. Animated Circular Audio-Reactive Waveform
             val barCount = 64
             val waveIntensity = when (coreState) {
-                CoreState.SPEAKING -> 0.45f + smoothedAmp * 0.95f
-                CoreState.LISTENING -> 0.22f + smoothedAmp * 0.85f
-                CoreState.THINKING -> 0.36f
+                CoreState.SPEAKING -> 0.24f + smoothedAmp * 0.95f
+                CoreState.LISTENING -> 0.14f + smoothedAmp * 0.85f
+                CoreState.CONNECTING -> 0.28f
+                CoreState.PROCESSING -> 0.36f
                 CoreState.ERROR -> 0.14f
                 CoreState.IDLE -> 0.08f
             }
@@ -321,7 +326,7 @@ fun HolographicCore(
                     center.x + (orbitR * cos(thetaRad)).toFloat(),
                     center.y + (orbitR * sin(thetaRad)).toFloat()
                 )
-                val brightnessBoost = if (coreState == CoreState.THINKING || coreState == CoreState.SPEAKING) 0.35f else 0f
+                val brightnessBoost = if (coreState == CoreState.PROCESSING || coreState == CoreState.SPEAKING || coreState == CoreState.CONNECTING) 0.35f else 0f
                 val alpha = (p.alphaBase + brightnessBoost).coerceIn(0f, 1f)
                 val pColor = if (coreState == CoreState.ERROR) BumbleCrimson else BumbleGoldBright
                 drawCircle(

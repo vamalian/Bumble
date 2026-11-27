@@ -13,6 +13,15 @@ interface ConversationDao {
     @Query("SELECT * FROM conversation_sessions ORDER BY updatedAt DESC")
     fun observeSessions(): Flow<List<ConversationSessionEntity>>
 
+    @Query("SELECT COUNT(*) FROM conversation_sessions")
+    fun observeSessionCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM conversation_messages")
+    fun observeTotalMessageCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM conversation_messages WHERE role = :role")
+    fun observeMessageCountByRole(role: String): Flow<Int>
+
     @Query("SELECT * FROM conversation_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     fun observeMessagesForSession(sessionId: Long): Flow<List<ConversationMessageEntity>>
 
@@ -40,6 +49,9 @@ interface MemoryDao {
     @Query("SELECT * FROM personal_memories ORDER BY isApproved ASC, updatedAt DESC")
     fun observeAllMemories(): Flow<List<MemoryEntity>>
 
+    @Query("SELECT COUNT(*) FROM personal_memories")
+    fun observeMemoryCount(): Flow<Int>
+
     @Query("SELECT * FROM personal_memories WHERE isApproved = 1 ORDER BY updatedAt DESC")
     suspend fun getApprovedMemories(): List<MemoryEntity>
 
@@ -64,6 +76,9 @@ interface NoteDao {
     @Query("SELECT * FROM notes ORDER BY isPinned DESC, updatedAt DESC")
     fun observeNotes(): Flow<List<NoteEntity>>
 
+    @Query("SELECT COUNT(*) FROM notes")
+    fun observeNoteCount(): Flow<Int>
+
     @Query("SELECT * FROM notes ORDER BY isPinned DESC, updatedAt DESC")
     suspend fun getNotesOnce(): List<NoteEntity>
 
@@ -84,6 +99,9 @@ interface NoteDao {
 interface ReminderDao {
     @Query("SELECT * FROM reminders ORDER BY isCompleted ASC, triggerAtMillis ASC")
     fun observeReminders(): Flow<List<ReminderEntity>>
+
+    @Query("SELECT COUNT(*) FROM reminders")
+    fun observeReminderCount(): Flow<Int>
 
     @Query("SELECT * FROM reminders WHERE isCompleted = 0 ORDER BY triggerAtMillis ASC")
     suspend fun getPendingReminders(): List<ReminderEntity>

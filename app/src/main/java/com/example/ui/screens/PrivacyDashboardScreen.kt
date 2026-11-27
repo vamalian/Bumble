@@ -138,7 +138,7 @@ fun PrivacyDashboardScreen(
             PermissionRowCard(
                 icon = Icons.Default.Mic,
                 title = "Microphone (RECORD_AUDIO)",
-                description = "Required for voice input and foreground 'Hey Bumble' wake word.",
+                description = "Required for Gemini Live real-time audio streaming (16 kHz PCM) and foreground 'Hey Bumble' wake word.",
                 granted = micGranted,
                 actionLabel = if (micGranted) "App Settings" else "Grant Mic",
                 onAction = {

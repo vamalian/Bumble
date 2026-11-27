@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -15,9 +16,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.NetworkCheck
@@ -38,8 +43,6 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,15 +81,16 @@ fun SettingsScreen(
     onClearHistory: () -> Unit,
     onClearMemories: () -> Unit,
     onNavigateToPrivacy: () -> Unit,
+    onNavigateToAdmin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var apiKeyDraft by remember { mutableStateOf("") }
     var showKeyPlaintext by remember { mutableStateOf(false) }
-    var customGeminiModel by remember { mutableStateOf(settings.geminiModel) }
+    var customLiveModel by remember { mutableStateOf(settings.liveModel) }
     var customPromptDraft by remember { mutableStateOf(settings.customSystemPrompt) }
 
-    LaunchedEffect(settings.geminiModel) {
-        customGeminiModel = settings.geminiModel
+    LaunchedEffect(settings.liveModel) {
+        customLiveModel = settings.liveModel
     }
     LaunchedEffect(settings.customSystemPrompt) {
         if (customPromptDraft.isEmpty() && settings.customSystemPrompt.isNotEmpty()) {
@@ -105,7 +109,7 @@ fun SettingsScreen(
             modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("Settings & Gemini API", style = MaterialTheme.typography.headlineMedium, color = BumbleGoldBright)
+            Text("Settings & Gemini Live", style = MaterialTheme.typography.headlineMedium, color = BumbleGoldBright)
 
             // 1. Secure API Key Configuration
             HudPanel(highlightBorder = !hasApiKey, modifier = Modifier.fillMaxWidth()) {
@@ -164,7 +168,7 @@ fun SettingsScreen(
                             Icon(Icons.Default.NetworkCheck, contentDescription = null, tint = BumbleGoldBright)
                         }
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Test API Connection", color = BumbleGoldBright)
+                        Text("Test Live & REST", color = BumbleGoldBright)
                     }
 
                     if (hasApiKey) {
@@ -193,15 +197,15 @@ fun SettingsScreen(
                 }
             }
 
-            // 2. Gemini Models
+            // 2. Gemini Live & Vision Models
             HudPanel(modifier = Modifier.fillMaxWidth()) {
-                Text("GEMINI MODELS", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
-                Text("Assistant & Chat Model", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
+                Text("GEMINI LIVE & VISION MODELS", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
+                Text("Gemini Live Model (BidiGenerateContent Audio)", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BumbleSettings.GEMINI_MODEL_OPTIONS.forEach { m ->
+                    BumbleSettings.LIVE_MODEL_OPTIONS.forEach { m ->
                         FilterChip(
-                            selected = settings.geminiModel == m,
-                            onClick = { onUpdateSettings { it.copy(geminiModel = m) } },
+                            selected = settings.liveModel == m,
+                            onClick = { onUpdateSettings { it.copy(liveModel = m) } },
                             label = { Text(m, style = MaterialTheme.typography.labelSmall) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BumbleGold, selectedLabelColor = BumbleVoidBlack)
                         )
@@ -213,18 +217,18 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedTextField(
-                        value = customGeminiModel,
-                        onValueChange = { customGeminiModel = it },
-                        label = { Text("Custom Gemini Model ID") },
+                        value = customLiveModel,
+                        onValueChange = { customLiveModel = it },
+                        label = { Text("Custom Live Model ID") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = {
-                            onUpdateSettings { s -> s.copy(geminiModel = customGeminiModel) }
+                            onUpdateSettings { s -> s.copy(liveModel = customLiveModel) }
                         }),
                         modifier = Modifier.weight(1f).testTag("custom_model_input")
                     )
                     OutlinedButton(
-                        onClick = { onUpdateSettings { s -> s.copy(geminiModel = customGeminiModel) } },
+                        onClick = { onUpdateSettings { s -> s.copy(liveModel = customLiveModel) } },
                         border = BorderStroke(1.dp, BumbleGold),
                         modifier = Modifier.testTag("apply_custom_model_button")
                     ) {
@@ -232,8 +236,8 @@ fun SettingsScreen(
                     }
                 }
 
-                Text("Vision & Tools Model", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Vision & Tools Model (REST Multimodal)", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     BumbleSettings.VISION_MODEL_OPTIONS.forEach { m ->
                         FilterChip(
                             selected = settings.visionModel == m,
@@ -245,30 +249,37 @@ fun SettingsScreen(
                 }
             }
 
-            // 3. Voice, Language & Personality
+            // 3. Live Voice, Language & Personality
             HudPanel(modifier = Modifier.fillMaxWidth()) {
-                Text("VOICE, LANGUAGE & PERSONALITY", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
-                SettingToggleRow(
-                    title = "Speak Replies Automatically",
-                    subtitle = "Read Gemini responses aloud with Android Text-to-Speech.",
-                    checked = settings.autoSpeakReplies,
-                    onCheckedChange = { enabled -> onUpdateSettings { it.copy(autoSpeakReplies = enabled) } }
-                )
-
-                Text("Voice Profile", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BumbleSettings.VOICE_PROFILES.forEach { v ->
+                Text("LIVE VOICE, LANGUAGE & PERSONALITY", style = MaterialTheme.typography.labelLarge, color = BumbleGold)
+                Text("Gemini Live Prebuilt Voice", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BumbleSettings.LIVE_VOICE_OPTIONS.forEach { v ->
                         FilterChip(
-                            selected = settings.voiceProfile == v,
-                            onClick = { onUpdateSettings { it.copy(voiceProfile = v) } },
+                            selected = settings.liveVoice == v,
+                            onClick = { onUpdateSettings { it.copy(liveVoice = v) } },
                             label = { Text(v) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BumbleGold, selectedLabelColor = BumbleVoidBlack)
                         )
                     }
                 }
 
+                SettingToggleRow(
+                    title = "Auto-Reconnect Live Session",
+                    subtitle = "Automatically resume WebSocket with exponential backoff on transient drops.",
+                    checked = settings.autoReconnect,
+                    onCheckedChange = { enabled -> onUpdateSettings { it.copy(autoReconnect = enabled) } }
+                )
+
+                SettingToggleRow(
+                    title = "Voice Interruption (Barge-In)",
+                    subtitle = "Stop Bumble playback immediately when Gemini detects you speaking.",
+                    checked = settings.voiceBargeInEnabled,
+                    onCheckedChange = { enabled -> onUpdateSettings { it.copy(voiceBargeInEnabled = enabled) } }
+                )
+
                 Text("Language Mode", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     BumbleSettings.LANGUAGE_OPTIONS.forEach { lang ->
                         FilterChip(
                             selected = settings.languageMode == lang,
@@ -280,7 +291,7 @@ fun SettingsScreen(
                 }
 
                 Text("AI Personality", style = MaterialTheme.typography.bodyMedium, color = BumbleTextSecondary)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     BumbleSettings.PERSONALITY_OPTIONS.forEach { p ->
                         FilterChip(
                             selected = settings.personality == p,
@@ -361,6 +372,49 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Open Permissions & Privacy Dashboard")
+                }
+            }
+
+            // 6. Discreet Owner Console Entry (Protected by Owner Authentication)
+            HudPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("owner_console_entry")
+                    .clickable(onClick = onNavigateToAdmin)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AdminPanelSettings,
+                            contentDescription = "Owner Console",
+                            tint = BumbleTextSecondary
+                        )
+                        Column {
+                            Text(
+                                text = "Owner Console",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Password-protected diagnostics & system controls",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = BumbleTextSecondary
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = BumbleTextSecondary
+                    )
                 }
             }
 

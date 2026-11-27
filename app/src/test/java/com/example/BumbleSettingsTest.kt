@@ -14,22 +14,52 @@ import org.robolectric.annotation.Config
 class BumbleSettingsTest {
 
     @Test
-    fun `sanitizeModelId migrates legacy live and native audio models to default`() {
+    fun `sanitizeLiveModelId preserves supported Live models and migrates legacy`() {
+        assertEquals("gemini-3.1-flash-live-preview", BumbleSettings.DEFAULT_LIVE_MODEL)
         assertEquals(
-            BumbleSettings.DEFAULT_GEMINI_MODEL,
-            BumbleSettings.sanitizeModelId("models/gemini-2.5-flash-native-audio-preview-09-2025")
+            "gemini-3.1-flash-live-preview",
+            BumbleSettings.sanitizeLiveModelId("models/gemini-3.1-flash-live-preview")
         )
         assertEquals(
-            BumbleSettings.DEFAULT_GEMINI_MODEL,
-            BumbleSettings.sanitizeModelId("gemini-2.0-flash-live-001")
+            "gemini-2.5-flash-native-audio-preview-12-2025",
+            BumbleSettings.sanitizeLiveModelId("models/gemini-2.5-flash-native-audio-preview-12-2025")
         )
         assertEquals(
-            BumbleSettings.DEFAULT_GEMINI_MODEL,
-            BumbleSettings.sanitizeModelId("   ")
+            BumbleSettings.DEFAULT_LIVE_MODEL,
+            BumbleSettings.sanitizeLiveModelId("gemini-2.0-flash-live-001")
         )
         assertEquals(
-            "gemini-2.5-pro",
-            BumbleSettings.sanitizeModelId("models/gemini-2.5-pro")
+            BumbleSettings.DEFAULT_LIVE_MODEL,
+            BumbleSettings.sanitizeLiveModelId("gemini-1.5-pro")
+        )
+        assertEquals(
+            BumbleSettings.DEFAULT_LIVE_MODEL,
+            BumbleSettings.sanitizeLiveModelId("gemini-2.5-flash")
+        )
+        assertEquals(
+            BumbleSettings.DEFAULT_LIVE_MODEL,
+            BumbleSettings.sanitizeLiveModelId("   ")
+        )
+    }
+
+    @Test
+    fun `sanitizeVisionModelId keeps modern vision models and migrates deprecated`() {
+        assertEquals("gemini-3.8-flash", BumbleSettings.DEFAULT_VISION_MODEL)
+        assertEquals(
+            "gemini-4-argon",
+            BumbleSettings.sanitizeVisionModelId("models/gemini-4-argon")
+        )
+        assertEquals(
+            BumbleSettings.DEFAULT_VISION_MODEL,
+            BumbleSettings.sanitizeVisionModelId("gemini-2.5-flash-native-audio-preview-09-2025")
+        )
+        assertEquals(
+            BumbleSettings.DEFAULT_VISION_MODEL,
+            BumbleSettings.sanitizeVisionModelId("gemini-3.1-flash-live-preview")
+        )
+        assertEquals(
+            BumbleSettings.DEFAULT_VISION_MODEL,
+            BumbleSettings.sanitizeVisionModelId("gemini-1.5-flash")
         )
     }
 

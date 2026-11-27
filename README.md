@@ -1,20 +1,22 @@
 # Bumble AI — Native Android JARVIS-Style Assistant
 
-**Bumble AI** is a native Kotlin + Jetpack Compose Android assistant powered by Google's **Gemini API** (`generateContent` with multi-turn chat, function calling, and multimodal vision), featuring a golden holographic JARVIS-inspired HUD core.
+**Bumble AI** is a native Kotlin + Jetpack Compose Android assistant powered by Google's **Gemini Live API** (`v1beta BidiGenerateContent` WebSocket for real-time bidirectional voice + tools) and **Gemini REST API** (multimodal Vision, Translator, and Daily Planner), featuring a golden holographic JARVIS-inspired HUD core.
 
 ## Core Capabilities
 
 1. **Golden Holographic AI Core (`HolographicCore`)**
-   - Custom Jetpack Compose `Canvas` core with rotating segmented HUD rings, counter-rotating telemetry ticks, orbiting glowing particles, and a 64-bar audio-reactive circular waveform.
-   - Distinct animated states: `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, and `ERROR`.
+   - Custom Jetpack Compose `Canvas` core with rotating segmented HUD rings, counter-rotating telemetry ticks, orbiting glowing particles, and a 64-bar audio-reactive circular waveform driven by genuine PCM RMS amplitude.
+   - 6 animated states: `IDLE`, `CONNECTING`, `LISTENING`, `PROCESSING`, `SPEAKING`, and `ERROR`.
 
-2. **Normal Gemini Assistant & Voice I/O (`GeminiRestClient` + `VoiceInputManager` + `VoiceOutputManager`)**
-   - Multi-turn text & voice conversations via Google Gemini REST API (`gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-pro`, or custom model ID) with multi-round function calling.
-   - Foreground Android `SpeechRecognizer` voice capture with RMS audio-reactive core telemetry and Android `TextToSpeech` spoken replies with configurable voice profiles, personalities, and multilingual support (English, Urdu, Hindi, and mixed code-switching).
+2. **Gemini Live Bidirectional Voice (`GeminiLiveClient` + `LiveAudioEngine`)**
+   - Real-time `BidiGenerateContent` WebSocket connection supporting `gemini-3.1-flash-live-preview`, `gemini-2.5-flash-native-audio-preview-12-2025`, and `gemini-2.5-flash-native-audio-preview-09-2025`.
+   - Captures 16 kHz mono 16-bit PCM via `AudioRecord` (`VOICE_COMMUNICATION` with `MIC` fallback + hardware `AcousticEchoCanceler` & `NoiseSuppressor`).
+   - Plays 24 kHz mono 16-bit PCM speech via `AudioTrack` (`USAGE_MEDIA`, `CONTENT_TYPE_SPEECH`) with `AudioFocus`, bounded queue, barge-in interruption, and session resumption/reconnection.
+   - Configurable official prebuilt voices (`Kore`, `Puck`, `Charon`, `Fenrir`, `Aoede`, `Zephyr`, `Orus`, `Leda`), personalities, and multilingual support (English, Urdu, Hindi, and mixed code-switching).
 
 3. **Foreground-Only `"Hey Bumble"` Wake Word (`WakeWordManager`)**
    - Listens strictly while the app is open and `RESUMED`.
-   - Immediately stops and destroys audio capture and speech recognition when paused, backgrounded, or closed. No background microphone service and no floating overlays.
+   - Immediately stops and destroys audio capture, playback, and WebSocket sessions when paused, backgrounded, or closed. No background microphone service and no floating overlays.
 
 4. **Real Android Assistant Actions (`AndroidActionExecutor`)**
    - Launch installed applications via `PackageManager` launch intents.
@@ -29,12 +31,16 @@
    - Zero-permission Android Photo Picker (`PickVisualMedia`).
    - Consented one-shot Screen Understanding (`MediaProjection`) that stops immediately after capturing a single frame.
 
-6. **Personal AI Utilities & Local Storage**
-   - Hardware-backed **Android Keystore AES-256-GCM** encrypted Gemini API key storage (`SecureKeyStore`).
-   - Live Weather (Open-Meteo), Web Search (DuckDuckGo / Wikipedia), Scientific Calculator (`MathEvaluator`), Multilingual Translator, and Daily Planner.
-   - User-approved Personal Memory & Conversation History stored locally in Room.
+6. **Private Owner Console (`AdminScreen` + `AdminCredentialStore`)**
+   - Discreet entry inside Settings gated by local authentication (PBKDF2-HMAC-SHA256 + Android Keystore AES-256-GCM, 5-attempt lockout, 5-minute inactivity timeout, background auto-lock).
+   - Includes Live WebSocket & REST diagnostics, real 16 kHz mic & 24 kHz speaker tests, permission/app health telemetry, privacy-safe aggregate `COUNT(*)` stats, model/API key configuration, password update, and secure logout.
 
-## Building APKs
+## Building & Testing
+
+### Unit & Robolectric Tests
+```bash
+gradle :app:testDebugUnitTest
+```
 
 ### Debug APK
 ```bash
@@ -46,9 +52,4 @@ Output: `app/build/outputs/apk/debug/app-debug.apk`
 Configure signing environment variables (`KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`) and run:
 ```bash
 gradle :app:assembleRelease
-```
-
-### Unit & Robolectric Tests
-```bash
-gradle :app:testDebugUnitTest
 ```

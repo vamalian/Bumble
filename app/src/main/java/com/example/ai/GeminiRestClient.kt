@@ -44,7 +44,7 @@ class GeminiRestClient {
 
     suspend fun testConnection(
         apiKey: String,
-        model: String = BumbleSettings.DEFAULT_GEMINI_MODEL
+        model: String = BumbleSettings.DEFAULT_VISION_MODEL
     ): ConnectionTestResult = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim()
         if (cleanKey.isBlank()) {
@@ -74,7 +74,7 @@ class GeminiRestClient {
                 val modelsArr = JSONObject(body).optJSONArray("models")
                 val count = modelsArr?.length() ?: 0
                 val cleanModel = model.removePrefix("models/")
-                    .ifBlank { BumbleSettings.DEFAULT_GEMINI_MODEL }
+                    .ifBlank { BumbleSettings.DEFAULT_VISION_MODEL }
                 val modelCheckUrl = "$API_BASE/models/$cleanModel?key=$cleanKey"
                 val modelReq = Request.Builder().url(modelCheckUrl).get().build()
                 val modelVerified = client.newCall(modelReq).execute().use { mResp ->
@@ -133,8 +133,8 @@ class GeminiRestClient {
                 "Gemini API key is required. Configure it in Settings."
             }
 
-            val modelId = settings.geminiModel.removePrefix("models/")
-                .ifBlank { BumbleSettings.DEFAULT_GEMINI_MODEL }
+            val modelId = settings.visionModel.removePrefix("models/")
+                .ifBlank { BumbleSettings.DEFAULT_VISION_MODEL }
 
             val contents = JSONArray()
             history.takeLast(16).forEach { turn ->
